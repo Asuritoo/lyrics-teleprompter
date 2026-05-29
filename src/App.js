@@ -491,7 +491,7 @@ export default function App() {
     setSpotifyError("");
     setSpotifyPlaylists([]);
     try {
-      const r = await fetch("https://api.spotify.com/v1/me/playlists?limit=50", {
+      const r = await fetch("https://api.spotify.com/v1/me/playlists?limit=50&fields=items(id,name,tracks(total)),next,total", {
         headers: { Authorization: "Bearer " + token }
       });
       if (r.status === 401) {
@@ -534,7 +534,7 @@ export default function App() {
     try {
       // Get all tracks
       let tracks = [];
-      let url = "https://api.spotify.com/v1/playlists/" + spPlaylist.id + "/tracks?limit=50";
+      let url = "https://api.spotify.com/v1/playlists/" + spPlaylist.id + "/tracks?limit=50&fields=items(track(name,artists(name))),next";
       while (url) {
         const r = await fetch(url, { headers: { Authorization: "Bearer " + token } });
         if (!r.ok) break;
@@ -546,8 +546,6 @@ export default function App() {
         }))];
         url = data.next || null;
       }
-
-      setImportProgress({ done: 0, total: tracks.length });
 
       // Create playlist in app
       const playlistId = Date.now().toString();
@@ -773,7 +771,7 @@ export default function App() {
               {!spotifyLoading && spotifyPlaylists.length > 0 && spotifyPlaylists.map((pl, i) => {
                 if (!pl) return null;
                 const name = pl.name || "Playlist";
-                const total = pl.tracks_count || (pl.tracks && pl.tracks.total) || "?";
+                const total = (pl && pl.tracks && typeof pl.tracks.total === "number") ? pl.tracks.total : "?";
                 const isImp = importingPlaylist === pl.id;
                 return (
                   <div key={i} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 0", borderBottom:"1px solid " + BORDER }}>
