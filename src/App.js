@@ -254,16 +254,24 @@ export default function App() {
     try { ytPlayerRef.current?.stopVideo?.(); ytPlayerRef.current?.destroy?.(); } catch {}
     ytPlayerRef.current = null; usingYT.current = false;
     cancelAnimationFrame(rafRef.current); cancelAnimationFrame(syncRafRef.current);
-    let finalSong = song;
-    if (!song.videoId) {
+    let finalSong = { ...song };
+    // Auto-fetch missing data on first play
+    const needsVideo = !song.videoId;
+    const needsLyrics = !song.lyrics && !song.syncedLines;
+    if (needsVideo || needsLyrics) {
       try {
-        const r = await fetch(BACKEND+"/search?title="+encodeURIComponent(song.title)+"&artist="+encodeURIComponent(song.artist||""));
+        const endpoint = needsVideo ? "/search" : "/lyrics";
+        const r = await fetch(BACKEND+endpoint+"?title="+encodeURIComponent(song.title)+"&artist="+encodeURIComponent(song.artist||""));
         if (r.ok) {
           const data = await r.json();
-          if (data.videoId) {
-            finalSong = { ...song, videoId:data.videoId, videoTitle:data.videoTitle, thumbnail:data.thumbnail };
-            setSongs(s => s.map(x => x.id===song.id ? finalSong : x));
-          }
+          const synced = parseLRC(data.synced);
+          if (needsVideo && data.videoId) finalSong.videoId = data.videoId;
+          if (needsVideo && data.videoTitle) finalSong.videoTitle = data.videoTitle;
+          if (needsVideo && data.thumbnail) finalSong.thumbnail = data.thumbnail;
+          if (needsLyrics && data.plain) finalSong.lyrics = data.plain;
+          if (needsLyrics && synced) finalSong.syncedLines = synced;
+          if (needsLyrics && !data.plain && synced) finalSong.lyrics = synced.map(l=>l.text).join("\n");
+          setSongs(s => s.map(x => x.id===song.id ? {...x,...finalSong} : x));
         }
       } catch {}
     }
@@ -515,11 +523,11 @@ export default function App() {
             })() : active.lyrics && active.lyrics.trim()
               ? active.lyrics.split("\n").map((line,i)=>(
                   <div key={i} style={{textAlign:"center",fontSize,color:"#fff",padding:"3px 16px",lineHeight:1.65,maxWidth:560,margin:"0 auto",fontFamily:"'Circular Std','Helvetica Neue',sans-serif"}}>
-                    {line||<span style={{opacity:0}}>\u00b7</span>}
+                    {line||<span style={{opacity:0}}>·</span>}
                   </div>
                 ))
               : <div style={{textAlign:"center",color:"#535353",padding:"60px 20px"}}>
-                  <div style={{fontSize:32,marginBottom:12}}>\U0001f3b5</div>
+                  <div style={{fontSize:32,marginBottom:12}}>🎵</div>
                   <div style={{fontSize:15}}>Pas de paroles disponibles</div>
                   <div style={{fontSize:13,marginTop:8}}>Lance ta musique sur Spotify</div>
                 </div>
