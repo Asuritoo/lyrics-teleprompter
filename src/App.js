@@ -220,22 +220,31 @@ export default function App() {
   // Persist
   useEffect(() => { save({ songs, playlists }); }, [songs, playlists]);
 
-  // Handle Spotify OAuth callback — token comes back from backend in URL params
+  // Handle Spotify OAuth callback — backend gives us a short code, we fetch the real token
   useEffect(() => {
     try {
-      const url     = new URL(window.location.href);
-      const token   = url.searchParams.get("spotify_token");
-      const expires = url.searchParams.get("spotify_expires");
-      const refresh = url.searchParams.get("spotify_refresh") || "";
-      const error   = url.searchParams.get("spotify_error");
-      if (token) {
-        try {
-          const expiresAt = Date.now() + parseInt(expires || "3600") * 1000;
-          localStorage.setItem("spotify_token", JSON.stringify({ access_token: token, refresh_token: refresh, expires: expiresAt }));
-        } catch {}
-        setSpotifyToken(token);
+      const url   = new URL(window.location.href);
+      const sp    = url.searchParams.get("sp");
+      const error = url.searchParams.get("spotify_error");
+      if (sp) {
         window.history.replaceState({}, "", "/");
-        setTimeout(() => setView("spotify"), 100);
+        // Fetch real token from backend using short code
+        fetch(`${BACKEND}/token/${sp}`)
+          .then(r => r.ok ? r.json() : null)
+          .then(data => {
+            if (!data?.access_token) return;
+            try {
+              const expiresAt = Date.now() + (data.expires_in || 3600) * 1000;
+              localStorage.setItem("spotify_token", JSON.stringify({
+                access_token:  data.access_token,
+                refresh_token: data.refresh_token || "",
+                expires:       expiresAt,
+              }));
+            } catch {}
+            setSpotifyToken(data.access_token);
+            setTimeout(() => setView("spotify"), 100);
+          })
+          .catch(() => {});
       } else if (error) {
         window.history.replaceState({}, "", "/");
       }
