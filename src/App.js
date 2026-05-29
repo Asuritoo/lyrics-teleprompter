@@ -23,7 +23,19 @@ function parseLRC(lrc) {
 }
 
 function load() {
-  try { const r = localStorage.getItem(STORAGE_KEY); if (r) return JSON.parse(r); } catch {}
+  // Try current key first, then migrate from older versions
+  const KEYS = ["lyrics_v8", "lyrics_v7", "lyrics_v6", "lyrics_v5", "lyrics_v4", "lyrics_v3", "lyrics_v2", "lyrics_songs"];
+  for (const key of KEYS) {
+    try {
+      const r = localStorage.getItem(key);
+      if (!r) continue;
+      const parsed = JSON.parse(r);
+      // Old format was just an array of songs
+      if (Array.isArray(parsed)) return { songs: parsed, playlists: [] };
+      // New format has songs and playlists
+      if (parsed && (parsed.songs || parsed.playlists)) return { songs: parsed.songs || [], playlists: parsed.playlists || [] };
+    } catch {}
+  }
   return { songs: [], playlists: [] };
 }
 function save(s) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch {} }
