@@ -535,7 +535,8 @@ export default function App() {
     try {
       // Get all tracks
       let tracks = [];
-      let url = "https://api.spotify.com/v1/playlists/" + spPlaylist.id + "/tracks?limit=50";
+      // Use href from Spotify directly if available, otherwise build URL
+      let url = (spPlaylist.href ? spPlaylist.href + "/tracks" : "https://api.spotify.com/v1/playlists/" + spPlaylist.id + "/tracks") + "?limit=50";
       let pageCount = 0;
       while (url && pageCount < 20) {
         pageCount++;
@@ -734,7 +735,7 @@ export default function App() {
   }
 
   // ════════════════════════════════════════════════════════════════════════════
-  // SPOTIFY VIEW
+  // SPOTIFY VIEW (CSV Import)
   // ════════════════════════════════════════════════════════════════════════════
   if (view === "spotify") {
     return (
@@ -742,86 +743,127 @@ export default function App() {
         <style>{globalCSS}</style>
         <div style={S.editHeader}>
           <Btn onClick={() => setView("lib")} style={S.backBtn}>← Retour</Btn>
-          <span style={S.pageTitle}>🎵 Spotify</span>
+          <span style={S.pageTitle}>🎵 Importer Spotify</span>
         </div>
         <div style={S.editBody}>
 
-          {/* Étape 1 — Connexion */}
+          {/* Instructions */}
           <div style={{ background:"#0e1a10", border:"1px solid #1DB95444", borderRadius:14, padding:16, marginBottom:16 }}>
-            <div style={{ fontSize:11, letterSpacing:"0.15em", color:"#1DB954", textTransform:"uppercase", marginBottom:10 }}>Étape 1 — Connexion</div>
-            <div style={{ color:MUTED, fontSize:13, lineHeight:1.5, marginBottom:12 }}>Entre ton Client ID Spotify puis appuie sur Se connecter.</div>
-            <input value={spotifyClientId} onChange={e => setSpotifyClientId(e.target.value)}
-              placeholder="Client ID Spotify" style={{ ...S.input, marginBottom:10 }} />
-            <Btn onClick={connectSpotify} style={{ display:"block", width:"100%", background:"#1DB954", color:"#fff", borderRadius:12, padding:"13px", fontSize:15, fontWeight:700 }}>
-              🎵 Se connecter avec Spotify
-            </Btn>
+            <div style={{ fontSize:11, letterSpacing:"0.15em", color:"#1DB954", textTransform:"uppercase", marginBottom:10 }}>Comment faire</div>
+            <div style={{ color:TEXT, fontSize:14, lineHeight:1.7 }}>
+              1️⃣ Va sur <span style={{ color:GOLD }}>exportify.net</span> dans Safari{"
+"}
+              2️⃣ Connecte-toi avec Spotify{"
+"}
+              3️⃣ Exporte la playlist en CSV{"
+"}
+              4️⃣ Reviens ici et importe le fichier
+            </div>
           </div>
 
-          {/* Étape 2 — Code manuel */}
-          <div style={{ background:"#0e1520", border:"1px solid #e8c97a44", borderRadius:14, padding:16, marginBottom:16 }}>
-            <div style={{ fontSize:11, letterSpacing:"0.15em", color:GOLD, textTransform:"uppercase", marginBottom:10 }}>Étape 2 — Entre le code</div>
-            <div style={{ color:MUTED, fontSize:13, lineHeight:1.5, marginBottom:12 }}>Après avoir autorisé Spotify, une page affiche un code. Reviens ici et colle-le.</div>
-            <input value={manualCode} onChange={e => setManualCode(e.target.value)}
-              placeholder="Code court (ex: abc123)" style={{ ...S.input, marginBottom:10, textAlign:"center", fontSize:18 }} />
-            <Btn onClick={redeemManualCode} style={{ display:"block", width:"100%", background:manualCodeLoading ? "#1c2030" : GOLD, color:manualCodeLoading ? "#555" : "#000", borderRadius:12, padding:"13px", fontSize:15, fontWeight:700 }}>
-              {manualCodeLoading ? "Vérification..." : "✅ Valider le code"}
-            </Btn>
+          {/* CSV Import */}
+          <div style={{ background:CARD, border:"1px solid " + BORDER, borderRadius:14, padding:16, marginBottom:16 }}>
+            <div style={{ fontSize:11, letterSpacing:"0.15em", color:GOLD, textTransform:"uppercase", marginBottom:12 }}>Importer un fichier CSV</div>
+            <label style={{ display:"block", width:"100%", background:"#1DB954", color:"#fff", borderRadius:12, padding:"14px", fontSize:15, fontWeight:700, textAlign:"center", cursor:"pointer" }}>
+              📁 Choisir un fichier CSV
+              <input type="file" accept=".csv" style={{ display:"none" }} onChange={async (e) => {
+                const file = e.target.files && e.target.files[0];
+                if (!file) return;
+                const playlistName = file.name.replace(".csv", "").replace(/_/g, " ");
+                const text = await file.text();
+                const lines = text.split("\n").filter(l => l.trim());
+                if (lines.length < 2) { alert("Fichier vide ou invalide"); return; }
+
+                // Parse header to find Track Name and Artist columns
+                const headers = lines[0].split(",").map(h => h.replace(/"/g, "").trim());
+                const titleIdx = headers.indexOf("Track Name");
+                const artistIdx = headers.indexOf("Artist Name(s)");
+                if (titleIdx === -1) { alert("Format CSV invalide — colonne 'Track Name' introuvable"); return; }
+
+                // Parse tracks
+                const tracks = [];
+                for (let i = 1; i < lines.length; i++) {
+                  // Handle CSV with quoted fields
+                  const cols = [];
+                  let current = "";
+                  let inQuotes = false;
+                  for (let c = 0; c < lines[i].length; c++) {
+                    const ch = lines[i][c];
+                    if (ch === '"') { inQuotes = !inQuotes; }
+                    else if (ch === ',' && !inQuotes) { cols.push(current.trim()); current = ""; }
+                    else { current += ch; }
+                  }
+                  cols.push(current.trim());
+                  const title = cols[titleIdx] || "";
+                  const artist = artistIdx !== -1 ? (cols[artistIdx] || "") : "";
+                  if (title) tracks.push({ title, artist: artist.split(";")[0] });
+                }
+
+                if (tracks.length === 0) { alert("Aucun titre trouvé dans le CSV"); return; }
+
+                // Confirm import
+                if (!window.confirm("Importer " + tracks.length + " titres dans la playlist \"" + playlistName + "\" ?\n\nCela peut prendre quelques minutes.")) return;
+
+                // Create playlist and import
+                setImportingPlaylist("csv");
+                setImportProgress({ done: 0, total: tracks.length });
+
+                const playlistId = Date.now().toString();
+                const newPlaylist = { id: playlistId, name: playlistName, songIds: [], createdAt: Date.now(), fromSpotify: true };
+                const newSongs = [];
+
+                for (let i = 0; i < tracks.length; i++) {
+                  const { title, artist } = tracks[i];
+                  setImportProgress({ done: i + 1, total: tracks.length });
+                  try {
+                    const r = await fetch(BACKEND + "/search?title=" + encodeURIComponent(title) + "&artist=" + encodeURIComponent(artist));
+                    if (r.ok) {
+                      const data = await r.json();
+                      const synced = parseLRC(data.synced);
+                      const song = {
+                        id: "csv_" + Date.now() + "_" + i,
+                        title: data.title || title,
+                        artist: data.artist || artist,
+                        lyrics: data.plain || (synced ? synced.map(function(l) { return l.text; }).join("\n") : ""),
+                        syncedLines: synced,
+                        videoId: data.videoId || null,
+                        videoTitle: data.videoTitle || null,
+                        thumbnail: data.thumbnail || null,
+                        fontSize: 24,
+                      };
+                      newSongs.push(song);
+                      newPlaylist.songIds.push(song.id);
+                    } else {
+                      const song = { id: "csv_" + Date.now() + "_" + i, title, artist, lyrics: "", syncedLines: null, videoId: null, fontSize: 24 };
+                      newSongs.push(song);
+                      newPlaylist.songIds.push(song.id);
+                    }
+                  } catch {
+                    const song = { id: "csv_" + Date.now() + "_" + i, title, artist, lyrics: "", syncedLines: null, videoId: null, fontSize: 24 };
+                    newSongs.push(song);
+                    newPlaylist.songIds.push(song.id);
+                  }
+                  await new Promise(function(res) { setTimeout(res, 200); });
+                }
+
+                setSongs(function(s) { return [...s, ...newSongs]; });
+                setPlaylists(function(p) { return [...p, newPlaylist]; });
+                setImportingPlaylist(null);
+                alert("✅ " + newSongs.length + " chansons importées dans \"" + playlistName + "\" !");
+                setView("lib");
+              }} />
+            </label>
           </div>
 
-          {spotifyError && <div style={{ color:"#e07070", fontSize:13, marginBottom:12, textAlign:"center" }}>{spotifyError}</div>}
-
-          {/* Étape 3 — Playlists */}
-          {spotifyToken && (
+          {/* Import progress */}
+          {importingPlaylist === "csv" && (
             <div style={{ background:CARD, border:"1px solid " + BORDER, borderRadius:14, padding:16 }}>
-              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:12 }}>
-                <div style={{ fontSize:11, letterSpacing:"0.15em", color:GOLD, textTransform:"uppercase" }}>Étape 3 — Importer</div>
-                <div style={{ display:"flex", gap:8 }}>
-                  <Btn onClick={async () => {
-                    const t = spotifyToken || getSpotifyToken();
-                    if (!t) { alert("Pas de token"); return; }
-                    try {
-                      const r = await fetch("https://api.spotify.com/v1/me/playlists?limit=3", { headers: { Authorization: "Bearer " + t } });
-                      const d = await r.json();
-                      const first = d.items && d.items[0];
-                      if (first) {
-                        alert("KEYS: " + Object.keys(first).join(", ") + "\n\ntracks: " + JSON.stringify(first.tracks) + "\n\nfull: " + JSON.stringify(first).slice(0, 300));
-                      } else {
-                        alert("Réponse vide:\n" + JSON.stringify(d).slice(0, 300));
-                      }
-                    } catch(e) { alert("Erreur: " + e.message); }
-                  }} style={{ background:"#1c2030", color:"#aaa", borderRadius:8, padding:"6px 10px", fontSize:12 }}>
-                    🔍 Debug
-                  </Btn>
-                  <Btn onClick={() => { try { localStorage.removeItem("spotify_token"); } catch {} setSpotifyToken(null); setSpotifyPlaylists([]); }}
-                    style={{ background:"#1c2030", color:"#e07070", borderRadius:8, padding:"6px 10px", fontSize:12 }}>
-                    Déco
-                  </Btn>
-                </div>
+              <div style={{ color:TEXT, fontSize:14, marginBottom:10 }}>
+                Import en cours... {importProgress.done}/{importProgress.total}
               </div>
-              {spotifyLoading && <div style={{ color:MUTED, fontSize:14, textAlign:"center", padding:20 }}>Chargement...</div>}
-              {!spotifyLoading && spotifyPlaylists.length === 0 && (
-                <Btn onClick={loadSpotifyPlaylists} style={{ display:"block", width:"100%", background:"#1DB954", color:"#fff", borderRadius:12, padding:"13px", fontSize:15, fontWeight:700 }}>
-                  Charger mes playlists
-                </Btn>
-              )}
-              {!spotifyLoading && spotifyPlaylists.length > 0 && spotifyPlaylists.map((pl, i) => {
-                if (!pl) return null;
-                const name = pl.name || "Playlist";
-                const total = pl.total_tracks || "?";
-                const isImp = importingPlaylist === pl.id;
-                return (
-                  <div key={i} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 0", borderBottom:"1px solid " + BORDER }}>
-                    <div style={{ minWidth:0, flex:1 }}>
-                      <div style={{ color:TEXT, fontSize:14, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{name}</div>
-                      <div style={{ color:MUTED, fontSize:12 }}>{total} titres</div>
-                    </div>
-                    <Btn onClick={() => importSpotifyPlaylist(pl)}
-                      style={{ background:isImp ? "#2a2d36" : "#1DB954", color:"#fff", borderRadius:20, padding:"8px 14px", fontSize:13, fontWeight:700, marginLeft:10, flexShrink:0, whiteSpace:"nowrap" }}>
-                      {isImp ? (importProgress.done + "/" + importProgress.total) : "Importer"}
-                    </Btn>
-                  </div>
-                );
-              })}
+              <div style={{ height:4, background:"#1a1d28", borderRadius:4, overflow:"hidden" }}>
+                <div style={{ height:"100%", width: (importProgress.total > 0 ? Math.round(importProgress.done / importProgress.total * 100) : 0) + "%", background:"#1DB954", borderRadius:4, transition:"width 0.3s ease" }} />
+              </div>
             </div>
           )}
 
