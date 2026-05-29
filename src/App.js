@@ -527,26 +527,38 @@ export default function App() {
 
   async function importSpotifyPlaylist(spPlaylist) {
     const token = spotifyToken || getSpotifyToken();
-    if (!token) return;
+    if (!token) { alert("Token manquant, reconnecte-toi"); return; }
+    if (!spPlaylist || !spPlaylist.id) { alert("ID playlist manquant"); return; }
     setImportingPlaylist(spPlaylist.id);
     setImportProgress({ done: 0, total: 0 });
 
     try {
       // Get all tracks
       let tracks = [];
-      let url = "https://api.spotify.com/v1/playlists/" + spPlaylist.id + "/tracks?limit=50&fields=items(track(name,artists(name))),next";
-      while (url) {
+      let url = "https://api.spotify.com/v1/playlists/" + spPlaylist.id + "/tracks?limit=50";
+      let pageCount = 0;
+      while (url && pageCount < 20) {
+        pageCount++;
         const r = await fetch(url, { headers: { Authorization: "Bearer " + token } });
-        if (!r.ok) break;
+        if (!r.ok) {
+          alert("Erreur tracks HTTP " + r.status + " pour " + spPlaylist.name);
+          break;
+        }
         const data = await r.json();
-        const items = (data.items || []).filter(i => i && i.track && i.track.name);
-        tracks = [...tracks, ...items.map(i => ({
-          title: i.track.name,
-          artist: (i.track.artists && i.track.artists[0]) ? i.track.artists[0].name : ""
-        }))];
+        const items = (data.items || []).filter(function(i) { return i && i.track && i.track.name; });
+        items.forEach(function(i) {
+          tracks.push({
+            title: i.track.name,
+            artist: (i.track.artists && i.track.artists.length > 0) ? i.track.artists[0].name : ""
+          });
+        });
         url = data.next || null;
       }
-
+      if (tracks.length === 0) {
+        alert("Aucun titre trouvé dans " + spPlaylist.name + ". Playlist vide ou privée ?");
+        setImportingPlaylist(null);
+        return;
+      }
       // Create playlist in app
       const playlistId = Date.now().toString();
       const newPlaylist = { id: playlistId, name: spPlaylist.name, songIds: [], createdAt: Date.now(), fromSpotify: true };
@@ -795,7 +807,7 @@ export default function App() {
               {!spotifyLoading && spotifyPlaylists.length > 0 && spotifyPlaylists.map((pl, i) => {
                 if (!pl) return null;
                 const name = pl.name || "Playlist";
-                const total = (pl && pl.tracks && typeof pl.tracks.total === "number") ? pl.tracks.total : "?";
+                const total = pl.total_tracks || "?";
                 const isImp = importingPlaylist === pl.id;
                 return (
                   <div key={i} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 0", borderBottom:"1px solid " + BORDER }}>
