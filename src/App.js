@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 
 const STORAGE_KEY  = "lyrics_v7";
 const BACKEND      = "https://lyrics-backend-production.up.railway.app";
-const SPOTIFY_CLIENT_ID = "69c5a063a61a436d83be3136eeeb6059";
+const SPOTIFY_CLIENT_ID    = "69c5a063a61a436d83be3136eeeb6059"; // filled via OAuth flow
 const SPOTIFY_REDIRECT_URI = "https://lyrics-backend-production.up.railway.app/callback";
 const SPOTIFY_SCOPES       = "playlist-read-private playlist-read-collaborative user-library-read";
 
@@ -59,6 +59,7 @@ async function startSpotifyAuth(clientId) {
     redirect_uri: SPOTIFY_REDIRECT_URI,
     code_challenge_method: "S256",
     code_challenge: challenge,
+    state: verifier,
   });
   window.location.href = "https://accounts.spotify.com/authorize?" + params.toString();
 }
@@ -215,16 +216,19 @@ export default function App() {
   // Persist
   useEffect(() => { save({ songs, playlists }); }, [songs, playlists]);
 
-  // Handle Spotify OAuth callback
+  // Handle Spotify OAuth callback — token comes back from backend in URL params
   useEffect(() => {
-    const url    = new URL(window.location.href);
-    const code   = url.searchParams.get("code");
-    const error  = url.searchParams.get("error");
-    if (code) {
-      exchangeSpotifyCode(code).then(token => {
-        if (token) { setSpotifyToken(token); setView("spotify"); }
-        window.history.replaceState({}, "", "/");
-      });
+    const url   = new URL(window.location.href);
+    const token = url.searchParams.get("spotify_token");
+    const expires = url.searchParams.get("spotify_expires");
+    const refresh = url.searchParams.get("spotify_refresh");
+    const error = url.searchParams.get("spotify_error");
+    if (token) {
+      const expiresAt = Date.now() + parseInt(expires || "3600") * 1000;
+      localStorage.setItem("spotify_token", JSON.stringify({ access_token: token, refresh_token: refresh, expires: expiresAt }));
+      setSpotifyToken(token);
+      setView("spotify");
+      window.history.replaceState({}, "", "/");
     } else if (error) {
       window.history.replaceState({}, "", "/");
     }
