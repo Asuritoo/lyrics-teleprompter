@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 
 const STORAGE_KEY  = "lyrics_v7";
 const BACKEND      = "https://lyrics-backend-production.up.railway.app";
-const SPOTIFY_CLIENT_ID    = "69c5a063a61a436d83be3136eeeb6059"; // filled via OAuth flow
+const SPOTIFY_CLIENT_ID    = ""; // filled via OAuth flow
 const SPOTIFY_REDIRECT_URI = "https://lyrics-backend-production.up.railway.app/callback";
 const SPOTIFY_SCOPES       = "playlist-read-private playlist-read-collaborative user-library-read";
 
@@ -87,8 +87,12 @@ async function exchangeSpotifyCode(code) {
 }
 function getSpotifyToken() {
   try {
-    const t = JSON.parse(localStorage.getItem("spotify_token") || "null");
-    if (t && t.expires > Date.now() + 60000) return t.access_token;
+    const raw = localStorage.getItem("spotify_token");
+    if (!raw) return null;
+    const t = JSON.parse(raw);
+    if (t && t.access_token && t.expires > Date.now() + 60000) return t.access_token;
+    // Token expired but we have it — return it anyway and let the API call fail gracefully
+    if (t && t.access_token) return t.access_token;
   } catch {}
   return null;
 }
@@ -218,20 +222,24 @@ export default function App() {
 
   // Handle Spotify OAuth callback — token comes back from backend in URL params
   useEffect(() => {
-    const url   = new URL(window.location.href);
-    const token = url.searchParams.get("spotify_token");
-    const expires = url.searchParams.get("spotify_expires");
-    const refresh = url.searchParams.get("spotify_refresh");
-    const error = url.searchParams.get("spotify_error");
-    if (token) {
-      const expiresAt = Date.now() + parseInt(expires || "3600") * 1000;
-      localStorage.setItem("spotify_token", JSON.stringify({ access_token: token, refresh_token: refresh, expires: expiresAt }));
-      setSpotifyToken(token);
-      setView("spotify");
-      window.history.replaceState({}, "", "/");
-    } else if (error) {
-      window.history.replaceState({}, "", "/");
-    }
+    try {
+      const url     = new URL(window.location.href);
+      const token   = url.searchParams.get("spotify_token");
+      const expires = url.searchParams.get("spotify_expires");
+      const refresh = url.searchParams.get("spotify_refresh") || "";
+      const error   = url.searchParams.get("spotify_error");
+      if (token) {
+        try {
+          const expiresAt = Date.now() + parseInt(expires || "3600") * 1000;
+          localStorage.setItem("spotify_token", JSON.stringify({ access_token: token, refresh_token: refresh, expires: expiresAt }));
+        } catch {}
+        setSpotifyToken(token);
+        window.history.replaceState({}, "", "/");
+        setTimeout(() => setView("spotify"), 100);
+      } else if (error) {
+        window.history.replaceState({}, "", "/");
+      }
+    } catch {}
   }, []);
 
   // ── YouTube Player ──
@@ -441,13 +449,26 @@ export default function App() {
 
   async function loadSpotifyPlaylists() {
     const token = spotifyToken || getSpotifyToken();
-    if (!token) return;
+    if (!token) { setSpotifyError("Token manquant. Reconnecte-toi."); return; }
     setSpotifyLoading(true); setSpotifyError("");
     try {
-      const data = await spotifyFetch("https://api.spotify.com/v1/me/playlists?limit=50", token);
+      const r = await fetch("https://api.spotify.com/v1/me/playlists?limit=50", {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (r.status === 401) {
+        localStorage.removeItem("spotify_token");
+        setSpotifyToken(null);
+        setSpotifyError("Session expirée. Reconnecte-toi.");
+        return;
+      }
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const data = await r.json();
       setSpotifyPlaylists(data.items || []);
-    } catch { setSpotifyError("Erreur de connexion Spotify. Reconnecte-toi."); }
-    finally { setSpotifyLoading(false); }
+    } catch(e) {
+      setSpotifyError("Erreur : " + (e.message || "inconnue") + ". Reconnecte-toi.");
+    } finally {
+      setSpotifyLoading(false);
+    }
   }
 
   useEffect(() => { if (view === "spotify" && spotifyToken) loadSpotifyPlaylists(); }, [view, spotifyToken]);
