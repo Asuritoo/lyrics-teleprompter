@@ -751,13 +751,10 @@ export default function App() {
           <div style={{ background:"#0e1a10", border:"1px solid #1DB95444", borderRadius:14, padding:16, marginBottom:16 }}>
             <div style={{ fontSize:11, letterSpacing:"0.15em", color:"#1DB954", textTransform:"uppercase", marginBottom:10 }}>Comment faire</div>
             <div style={{ color:TEXT, fontSize:14, lineHeight:1.7 }}>
-              1️⃣ Va sur <span style={{ color:GOLD }}>exportify.net</span> dans Safari{"
-"}
-              2️⃣ Connecte-toi avec Spotify{"
-"}
-              3️⃣ Exporte la playlist en CSV{"
-"}
-              4️⃣ Reviens ici et importe le fichier
+              <div style={{ marginBottom:6 }}>1️⃣ Va sur <span style={{ color:GOLD }}>exportify.net</span> dans Safari</div>
+              <div style={{ marginBottom:6 }}>2️⃣ Connecte-toi avec Spotify</div>
+              <div style={{ marginBottom:6 }}>3️⃣ Exporte la playlist en CSV</div>
+              <div>4️⃣ Reviens ici et importe le fichier</div>
             </div>
           </div>
 
