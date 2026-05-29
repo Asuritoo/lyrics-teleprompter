@@ -764,9 +764,27 @@ export default function App() {
               <div style={{ fontSize:11, letterSpacing:"0.15em", color:GOLD, textTransform:"uppercase", marginBottom:10 }}>Étape 3 — Importer une playlist</div>
               {spotifyLoading && <div style={{ color:MUTED, fontSize:14, textAlign:"center", padding:20 }}>Chargement des playlists...</div>}
               {!spotifyLoading && spotifyPlaylists.length === 0 && (
-                <Btn onClick={loadSpotifyPlaylists} style={{ display:"block", width:"100%", background:"#1DB954", color:"#fff", borderRadius:12, padding:"13px", fontSize:15, fontWeight:700 }}>
-                  Charger mes playlists
-                </Btn>
+                <>
+                  <Btn onClick={loadSpotifyPlaylists} style={{ display:"block", width:"100%", background:"#1DB954", color:"#fff", borderRadius:12, padding:"13px", fontSize:15, fontWeight:700, marginBottom:10 }}>
+                    Charger mes playlists
+                  </Btn>
+                  <Btn onClick={async () => {
+                    const t = spotifyToken || getSpotifyToken();
+                    if (!t) { alert("Pas de token"); return; }
+                    try {
+                      const r = await fetch("https://api.spotify.com/v1/me/playlists?limit=3", { headers: { Authorization: "Bearer " + t } });
+                      const d = await r.json();
+                      const first = d.items && d.items[0];
+                      if (first) {
+                        alert("Playlist: " + first.name + "\ntracks: " + JSON.stringify(first.tracks) + "\nkeys: " + Object.keys(first).join(", "));
+                      } else {
+                        alert("Réponse: " + JSON.stringify(d).slice(0, 300));
+                      }
+                    } catch(e) { alert("Erreur: " + e.message); }
+                  }} style={{ display:"block", width:"100%", background:"#1c2030", color:"#aaa", borderRadius:12, padding:"10px", fontSize:13 }}>
+                    🔍 Déboguer (voir données brutes)
+                  </Btn>
+                </>
               )}
               {!spotifyLoading && spotifyPlaylists.length > 0 && spotifyPlaylists.map((pl, i) => {
                 if (!pl) return null;
