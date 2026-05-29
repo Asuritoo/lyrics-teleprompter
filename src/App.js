@@ -203,6 +203,8 @@ export default function App() {
   const [spotifyClientId, setSpotifyClientId]   = useState(localStorage.getItem("spotify_client_id_saved") || "");
   const [importingPlaylist, setImportingPlaylist] = useState(null);
   const [importProgress, setImportProgress]       = useState({ done: 0, total: 0 });
+  const [manualCode, setManualCode]               = useState("");
+  const [manualCodeLoading, setManualCodeLoading] = useState(false);
 
   // Refs
   const elapsedRef  = useRef(0);
@@ -456,6 +458,27 @@ export default function App() {
     await startSpotifyAuth(spotifyClientId);
   }
 
+  async function redeemManualCode() {
+    if (!manualCode.trim()) return;
+    setManualCodeLoading(true);
+    setSpotifyError("");
+    try {
+      const r = await fetch(`${BACKEND}/token/${manualCode.trim()}`);
+      if (!r.ok) { setSpotifyError("Code invalide ou expiré. Réessaie."); return; }
+      const data = await r.json();
+      if (!data?.access_token) { setSpotifyError("Code invalide."); return; }
+      const expiresAt = Date.now() + (data.expires_in || 3600) * 1000;
+      localStorage.setItem("spotify_token", JSON.stringify({
+        access_token: data.access_token,
+        refresh_token: data.refresh_token || "",
+        expires: expiresAt,
+      }));
+      setSpotifyToken(data.access_token);
+      setManualCode("");
+    } catch { setSpotifyError("Erreur réseau. Réessaie."); }
+    finally { setManualCodeLoading(false); }
+  }
+
   async function loadSpotifyPlaylists() {
     const token = spotifyToken || getSpotifyToken();
     if (!token) { setSpotifyError("Token manquant. Reconnecte-toi."); return; }
@@ -688,21 +711,46 @@ export default function App() {
         </div>
         <div style={S.editBody}>
           {!spotifyToken ? (
-            <div style={{ textAlign: "center", padding: "40px 0" }}>
-              <div style={{ fontSize: 48, marginBottom: 16 }}>🎵</div>
-              <div style={{ color: TEXT, fontSize: 17, fontWeight: 700, marginBottom: 8 }}>Connecter Spotify</div>
-              <div style={{ color: MUTED, fontSize: 14, marginBottom: 24, lineHeight: 1.5 }}>
-                Entre ton Client ID Spotify pour importer tes playlists.
+            <div style={{ padding: "20px 0" }}>
+              {/* Step 1 - Connect */}
+              <div style={{ background: "#0e1a10", border: "1px solid #1DB95444", borderRadius: 14, padding: 16, marginBottom: 16 }}>
+                <div style={{ fontSize: 11, letterSpacing: "0.15em", color: "#1DB954", textTransform: "uppercase", marginBottom: 10 }}>
+                  Étape 1 — Connexion
+                </div>
+                <div style={{ color: MUTED, fontSize: 13, lineHeight: 1.5, marginBottom: 12 }}>
+                  Entre ton Client ID Spotify puis connecte-toi. Une page s'ouvrira dans Safari.
+                </div>
+                <input
+                  value={spotifyClientId}
+                  onChange={e => setSpotifyClientId(e.target.value)}
+                  placeholder="Client ID Spotify (ex: a1b2c3...)"
+                  style={{ ...S.input, marginBottom: 10 }}
+                />
+                <Btn onClick={connectSpotify} style={{ display: "block", width: "100%", background: "#1DB954", color: "#fff", borderRadius: 12, padding: "13px", fontSize: 15, fontWeight: 700 }}>
+                  🎵 Se connecter avec Spotify
+                </Btn>
               </div>
-              <input
-                value={spotifyClientId}
-                onChange={e => setSpotifyClientId(e.target.value)}
-                placeholder="Client ID Spotify"
-                style={{ ...S.input, marginBottom: 12, textAlign: "center" }}
-              />
-              <Btn onClick={connectSpotify} style={{ ...S.saveBtn, background: "#1DB954", color: "#fff", marginTop: 8 }}>
-                Se connecter avec Spotify
-              </Btn>
+
+              {/* Step 2 - Enter code */}
+              <div style={{ background: "#0e1520", border: `1px solid ${GOLD}44`, borderRadius: 14, padding: 16 }}>
+                <div style={{ fontSize: 11, letterSpacing: "0.15em", color: GOLD, textTransform: "uppercase", marginBottom: 10 }}>
+                  Étape 2 — Entre le code affiché
+                </div>
+                <div style={{ color: MUTED, fontSize: 13, lineHeight: 1.5, marginBottom: 12 }}>
+                  Après avoir autorisé Spotify, une page affiche un code court. Reviens ici et colle-le.
+                </div>
+                <input
+                  value={manualCode}
+                  onChange={e => setManualCode(e.target.value)}
+                  placeholder="Code (ex: abc123)"
+                  style={{ ...S.input, marginBottom: 10, textAlign: "center", fontSize: 18, letterSpacing: "0.1em" }}
+                />
+                <Btn onClick={redeemManualCode} style={{ display: "block", width: "100%", background: manualCodeLoading ? "#1c2030" : GOLD, color: manualCodeLoading ? "#555" : "#000", borderRadius: 12, padding: "13px", fontSize: 15, fontWeight: 700 }}>
+                  {manualCodeLoading ? "Vérification..." : "✅ Valider le code"}
+                </Btn>
+              </div>
+
+              {spotifyError && <div style={{ marginTop: 12, color: "#e07070", fontSize: 13, textAlign: "center" }}>{spotifyError}</div>}
             </div>
           ) : (
             <>
