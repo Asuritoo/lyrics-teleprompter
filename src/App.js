@@ -809,38 +809,39 @@ export default function App() {
                 const newPlaylist = { id: playlistId, name: playlistName, songIds: [], createdAt: Date.now(), fromSpotify: true };
                 const newSongs = [];
 
-                for (let i = 0; i < tracks.length; i++) {
-                  const { title, artist } = tracks[i];
-                  setImportProgress({ done: i + 1, total: tracks.length });
-                  try {
-                    const r = await fetch(BACKEND + "/search?title=" + encodeURIComponent(title) + "&artist=" + encodeURIComponent(artist));
-                    if (r.ok) {
-                      const data = await r.json();
-                      const synced = parseLRC(data.synced);
-                      const song = {
-                        id: "csv_" + Date.now() + "_" + i,
-                        title: data.title || title,
-                        artist: data.artist || artist,
-                        lyrics: data.plain || (synced ? synced.map(function(l) { return l.text; }).join("\n") : ""),
-                        syncedLines: synced,
-                        videoId: data.videoId || null,
-                        videoTitle: data.videoTitle || null,
-                        thumbnail: data.thumbnail || null,
-                        fontSize: 24,
-                      };
-                      newSongs.push(song);
-                      newPlaylist.songIds.push(song.id);
-                    } else {
-                      const song = { id: "csv_" + Date.now() + "_" + i, title, artist, lyrics: "", syncedLines: null, videoId: null, fontSize: 24 };
-                      newSongs.push(song);
-                      newPlaylist.songIds.push(song.id);
-                    }
-                  } catch {
-                    const song = { id: "csv_" + Date.now() + "_" + i, title, artist, lyrics: "", syncedLines: null, videoId: null, fontSize: 24 };
+                // Import en parallèle par batch de 5 — 5x plus rapide
+                const BATCH = 5;
+                let done = 0;
+                for (let b = 0; b < tracks.length; b += BATCH) {
+                  const batch = tracks.slice(b, b + BATCH);
+                  const results = await Promise.all(batch.map(async function(track, j) {
+                    const idx = b + j;
+                    try {
+                      const r = await fetch(BACKEND + "/search?title=" + encodeURIComponent(track.title) + "&artist=" + encodeURIComponent(track.artist));
+                      if (r.ok) {
+                        const data = await r.json();
+                        const synced = parseLRC(data.synced);
+                        return {
+                          id: "csv_" + Date.now() + "_" + idx,
+                          title: data.title || track.title,
+                          artist: data.artist || track.artist,
+                          lyrics: data.plain || (synced ? synced.map(function(l) { return l.text; }).join("\n") : ""),
+                          syncedLines: synced,
+                          videoId: data.videoId || null,
+                          videoTitle: data.videoTitle || null,
+                          thumbnail: data.thumbnail || null,
+                          fontSize: 24,
+                        };
+                      }
+                    } catch {}
+                    return { id: "csv_" + Date.now() + "_" + idx, title: track.title, artist: track.artist, lyrics: "", syncedLines: null, videoId: null, fontSize: 24 };
+                  }));
+                  done += results.length;
+                  setImportProgress({ done, total: tracks.length });
+                  results.forEach(function(song) {
                     newSongs.push(song);
                     newPlaylist.songIds.push(song.id);
-                  }
-                  await new Promise(function(res) { setTimeout(res, 200); });
+                  });
                 }
 
                 setSongs(function(s) { return [...s, ...newSongs]; });
