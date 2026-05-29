@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 const STORAGE_KEY  = "lyrics_v7";
 const BACKEND      = "https://lyrics-backend-production.up.railway.app";
 const SPOTIFY_CLIENT_ID = "69c5a063a61a436d83be3136eeeb6059";
-const SPOTIFY_REDIRECT_URI = window.location.origin + "/callback";
+const SPOTIFY_REDIRECT_URI = "https://lyrics-backend-production.up.railway.app/callback";
 const SPOTIFY_SCOPES       = "playlist-read-private playlist-read-collaborative user-library-read";
 
 // ─── LRC parser ──────────────────────────────────────────────────────────────
