@@ -1,10 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 
-const STORAGE_KEY  = "lyrics_v7";
-const BACKEND      = "https://lyrics-backend-production.up.railway.app";
-const SPOTIFY_CLIENT_ID    = "69c5a063a61a436d83be3136eeeb6059";
+const STORAGE_KEY = "lyrics_v8";
+const BACKEND = "https://lyrics-backend-production.up.railway.app";
+const SPOTIFY_CLIENT_ID = "69c5a063a61a436d83be3136eeeb6059";
 const SPOTIFY_REDIRECT_URI = "https://lyrics-backend-production.up.railway.app/callback";
-const SPOTIFY_SCOPES       = "playlist-read-private playlist-read-collaborative user-library-read";
+const SPOTIFY_SCOPES = "playlist-read-private playlist-read-collaborative user-library-read";
 
 // ─── LRC parser ──────────────────────────────────────────────────────────────
 function parseLRC(lrc) {
@@ -22,7 +22,6 @@ function parseLRC(lrc) {
   return lines.length >= 2 ? lines : null;
 }
 
-// ─── Storage ─────────────────────────────────────────────────────────────────
 function load() {
   try { const r = localStorage.getItem(STORAGE_KEY); if (r) return JSON.parse(r); } catch {}
   return { songs: [], playlists: [] };
@@ -32,77 +31,9 @@ function vibrate(ms) { try { navigator.vibrate?.(ms); } catch {} }
 function fmt(s) {
   const m = Math.floor(s / 60);
   const sec = Math.floor(s % 60);
-  return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+  return `${String(m).padStart(2,"0")}:${String(sec).padStart(2,"0")}`;
 }
 
-// ─── Spotify PKCE ────────────────────────────────────────────────────────────
-async function generateCodeChallenge(verifier) {
-  const data = new TextEncoder().encode(verifier);
-  const digest = await window.crypto.subtle.digest("SHA-256", data);
-  return btoa(String.fromCharCode(...new Uint8Array(digest)))
-    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
-}
-function generateCodeVerifier() {
-  const array = new Uint8Array(56);
-  window.crypto.getRandomValues(array);
-  return btoa(String.fromCharCode(...array)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
-}
-async function startSpotifyAuth(clientId) {
-  const verifier  = generateCodeVerifier();
-  const challenge = await generateCodeChallenge(verifier);
-  sessionStorage.setItem("spotify_verifier", verifier);
-  sessionStorage.setItem("spotify_client_id", clientId);
-  const params = new URLSearchParams({
-    response_type: "code",
-    client_id: clientId,
-    scope: SPOTIFY_SCOPES,
-    redirect_uri: SPOTIFY_REDIRECT_URI,
-    code_challenge_method: "S256",
-    code_challenge: challenge,
-    state: verifier,
-  });
-  window.location.href = "https://accounts.spotify.com/authorize?" + params.toString();
-}
-async function exchangeSpotifyCode(code) {
-  const verifier  = sessionStorage.getItem("spotify_verifier");
-  const clientId  = sessionStorage.getItem("spotify_client_id");
-  if (!verifier || !clientId) return null;
-  const r = await fetch("https://accounts.spotify.com/api/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      code,
-      redirect_uri: SPOTIFY_REDIRECT_URI,
-      client_id: clientId,
-      code_verifier: verifier,
-    }),
-  });
-  if (!r.ok) return null;
-  const data = await r.json();
-  const expires = Date.now() + data.expires_in * 1000;
-  localStorage.setItem("spotify_token", JSON.stringify({ ...data, expires }));
-  sessionStorage.removeItem("spotify_verifier");
-  return data.access_token;
-}
-function getSpotifyToken() {
-  try {
-    const raw = localStorage.getItem("spotify_token");
-    if (!raw) return null;
-    const t = JSON.parse(raw);
-    if (t && t.access_token && t.expires > Date.now() + 60000) return t.access_token;
-    // Token expired but we have it — return it anyway and let the API call fail gracefully
-    if (t && t.access_token) return t.access_token;
-  } catch {}
-  return null;
-}
-async function spotifyFetch(url, token) {
-  const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-  if (!r.ok) throw new Error("Spotify API error");
-  return r.json();
-}
-
-// ─── Wake Lock ───────────────────────────────────────────────────────────────
 function useWakeLock(on) {
   const ref = useRef(null);
   useEffect(() => {
@@ -114,54 +45,75 @@ function useWakeLock(on) {
 
 function smoothScrollTo(el, target, duration = 300) {
   if (!el) return;
-  const start = el.scrollTop;
-  const dist  = target - start;
+  const start = el.scrollTop, dist = target - start;
   if (Math.abs(dist) < 2) return;
   const startT = performance.now();
   function step(now) {
-    const p    = Math.min((now - startT) / duration, 1);
-    const ease = p < 0.5 ? 2 * p * p : -1 + (4 - 2 * p) * p;
+    const p = Math.min((now - startT) / duration, 1);
+    const ease = p < 0.5 ? 2*p*p : -1+(4-2*p)*p;
     el.scrollTop = start + dist * ease;
     if (p < 1) requestAnimationFrame(step);
   }
   requestAnimationFrame(step);
 }
 
-// ─── YouTube Player hook ─────────────────────────────────────────────────────
 function useYouTubePlayer(videoId, onReady, onStateChange) {
   const playerRef = useRef(null);
   useEffect(() => {
     if (!videoId) return;
-    function createPlayer() {
+    function create() {
       if (playerRef.current) { try { playerRef.current.destroy(); } catch {} playerRef.current = null; }
       try {
         playerRef.current = new window.YT.Player("yt-player", {
           videoId,
-          playerVars: { autoplay: 0, controls: 1, rel: 0, modestbranding: 1, playsinline: 1, mute: 0, origin: window.location.origin },
+          playerVars: { autoplay:0, controls:1, rel:0, modestbranding:1, playsinline:1, mute:0, origin: window.location.origin },
           events: {
-            onReady: (e) => onReady?.(e.target),
-            onStateChange: (e) => onStateChange?.(e.data),
+            onReady: e => onReady?.(e.target),
+            onStateChange: e => onStateChange?.(e.data),
             onError: () => {},
           },
         });
       } catch {}
     }
-    if (window.YT?.Player) { createPlayer(); }
+    if (window.YT?.Player) { create(); }
     else {
       if (!document.getElementById("yt-script")) {
         const tag = document.createElement("script");
-        tag.id  = "yt-script";
-        tag.src = "https://www.youtube.com/iframe_api";
+        tag.id = "yt-script"; tag.src = "https://www.youtube.com/iframe_api";
         document.head.appendChild(tag);
       }
-      window.onYouTubeIframeAPIReady = createPlayer;
+      window.onYouTubeIframeAPIReady = create;
     }
-    return () => {
-      try { playerRef.current?.destroy?.(); } catch {}
-      playerRef.current = null;
-    };
+    return () => { try { playerRef.current?.destroy?.(); } catch {} playerRef.current = null; };
   }, [videoId]);
   return playerRef;
+}
+
+// ─── Spotify PKCE ────────────────────────────────────────────────────────────
+async function generateChallenge(verifier) {
+  const data = new TextEncoder().encode(verifier);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=/g,"");
+}
+function generateVerifier() {
+  const arr = new Uint8Array(56); crypto.getRandomValues(arr);
+  return btoa(String.fromCharCode(...arr)).replace(/\+/g,"-").replace(/\//g,"_").replace(/=/g,"");
+}
+async function startSpotifyAuth() {
+  const verifier = generateVerifier();
+  const challenge = await generateChallenge(verifier);
+  sessionStorage.setItem("spotify_verifier", verifier);
+  const params = new URLSearchParams({ response_type:"code", client_id:SPOTIFY_CLIENT_ID, scope:SPOTIFY_SCOPES, redirect_uri:SPOTIFY_REDIRECT_URI, code_challenge_method:"S256", code_challenge:challenge, state:verifier });
+  window.location.href = "https://accounts.spotify.com/authorize?" + params.toString();
+}
+function getSpotifyToken() {
+  try {
+    const raw = localStorage.getItem("spotify_token");
+    if (!raw) return null;
+    const t = JSON.parse(raw);
+    if (t && t.access_token) return t.access_token;
+  } catch {}
+  return null;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -169,15 +121,16 @@ export default function App() {
   const stored = load();
   const [songs, setSongs]         = useState(stored.songs || []);
   const [playlists, setPlaylists] = useState(stored.playlists || []);
-  const [view, setView]           = useState("lib"); // lib | edit | sing | spotify | playlist_view
+  const [tab, setTab]             = useState("home");   // home | search | library | import
+  const [view, setView]           = useState("lib");    // lib | edit | sing | playlist_detail
   const [active, setActive]       = useState(null);
   const [editTarget, setEdit]     = useState(null);
   const [form, setForm]           = useState(emptyForm());
   const [search, setSearch]       = useState("");
   const [delId, setDelId]         = useState(null);
-  const [activePlaylist, setActivePlaylist] = useState(null); // playlist being viewed
-  const [showPlaylistModal, setShowPlaylistModal] = useState(false);
-  const [newPlaylistName, setNewPlaylistName]     = useState("");
+  const [activePlaylist, setActivePlaylist] = useState(null);
+  const [showNewPlaylist, setShowNewPlaylist] = useState(false);
+  const [newPlaylistName, setNewPlaylistName] = useState("");
   const [addToPlaylistSong, setAddToPlaylistSong] = useState(null);
 
   // Karaoke
@@ -186,25 +139,17 @@ export default function App() {
   const [activeIdx, setActiveIdx] = useState(-1);
   const [locked, setLocked]       = useState(false);
   const [ytReady, setYtReady]     = useState(false);
-  const [ytBlocked, setYtBlocked] = useState(false);
   const [showVideo, setShowVideo] = useState(true);
   const [muted, setMuted]         = useState(false);
 
-  // Search lyrics
-  const [sq, setSq]               = useState({ title: "", artist: "" });
+  // Search/edit
+  const [sq, setSq]               = useState({ title:"", artist:"" });
   const [searching, setSearching] = useState(false);
   const [searchMsg, setSearchMsg] = useState("");
+  const [globalSearch, setGlobalSearch] = useState("");
 
-  // Spotify
-  const [spotifyToken, setSpotifyToken]         = useState(getSpotifyToken());
-  const [spotifyPlaylists, setSpotifyPlaylists] = useState([]);
-  const [spotifyLoading, setSpotifyLoading]     = useState(false);
-  const [spotifyError, setSpotifyError]         = useState("");
-  const [spotifyClientId, setSpotifyClientId]   = useState(localStorage.getItem("spotify_client_id_saved") || "69c5a063a61a436d83be3136eeeb6059");
-  const [importingPlaylist, setImportingPlaylist] = useState(null);
-  const [importProgress, setImportProgress]       = useState({ done: 0, total: 0 });
-  const [manualCode, setManualCode]               = useState("");
-  const [manualCodeLoading, setManualCodeLoading] = useState(false);
+  // Import
+  const [importProgress, setImportProgress] = useState({ done:0, total:0, active:false });
 
   // Refs
   const elapsedRef  = useRef(0);
@@ -218,70 +163,54 @@ export default function App() {
   const usingYT     = useRef(false);
 
   useWakeLock(view === "sing" && playing);
+  useEffect(() => save({ songs, playlists }), [songs, playlists]);
 
-  // Persist
-  useEffect(() => { save({ songs, playlists }); }, [songs, playlists]);
-
-  // Handle Spotify OAuth callback — backend gives us a short code, we fetch the real token
+  // Spotify callback
   useEffect(() => {
     try {
-      const url   = new URL(window.location.href);
-      const sp    = url.searchParams.get("sp");
-      const error = url.searchParams.get("spotify_error");
+      const url = new URL(window.location.href);
+      const sp = url.searchParams.get("sp");
       if (sp) {
         window.history.replaceState({}, "", "/");
-        // Fetch real token from backend using short code
-        fetch(`${BACKEND}/token/${sp}`)
-          .then(r => r.ok ? r.json() : null)
-          .then(data => {
-            if (!data?.access_token) return;
-            try {
-              const expiresAt = Date.now() + (data.expires_in || 3600) * 1000;
-              localStorage.setItem("spotify_token", JSON.stringify({
-                access_token:  data.access_token,
-                refresh_token: data.refresh_token || "",
-                expires:       expiresAt,
-              }));
-            } catch {}
-            setSpotifyToken(data.access_token);
-            setTimeout(() => setView("spotify"), 100);
-          })
-          .catch(() => {});
-      } else if (error) {
-        window.history.replaceState({}, "", "/");
+        fetch(BACKEND + "/token/" + sp).then(r => r.ok ? r.json() : null).then(data => {
+          if (!data?.access_token) return;
+          try {
+            localStorage.setItem("spotify_token", JSON.stringify({ access_token: data.access_token, expires: Date.now() + (data.expires_in||3600)*1000 }));
+          } catch {}
+          setTab("import");
+        }).catch(() => {});
       }
     } catch {}
   }, []);
 
-  // ── YouTube Player ──
+  // YouTube
   useYouTubePlayer(
     view === "sing" ? active?.videoId : null,
-    (player) => { ytPlayerRef.current = player; usingYT.current = true; setYtReady(true); },
-    (state) => {
+    player => { ytPlayerRef.current = player; usingYT.current = true; setYtReady(true); },
+    state => {
       if (state === 1) setPlaying(true);
       else if (state === 2 || state === 0) { setPlaying(false); baseElapsed.current = elapsedRef.current; }
     }
   );
 
-  // ── Sync loop ──
+  // Sync loop
   useEffect(() => {
     if (view !== "sing" || !playing) {
-      cancelAnimationFrame(syncRafRef.current);
-      cancelAnimationFrame(rafRef.current);
+      cancelAnimationFrame(syncRafRef.current); cancelAnimationFrame(rafRef.current);
       if (!playing) baseElapsed.current = elapsedRef.current;
       return;
     }
     if (usingYT.current && ytPlayerRef.current) {
       const poll = () => {
-        try { const t = ytPlayerRef.current?.getCurrentTime?.() ?? 0; elapsedRef.current = t; setElapsed(t); } catch {}
+        try { const t = ytPlayerRef.current?.getCurrentTime?.()??0; elapsedRef.current=t; setElapsed(t); } catch {}
         syncRafRef.current = requestAnimationFrame(poll);
       };
       syncRafRef.current = requestAnimationFrame(poll);
     } else {
       startTsRef.current = performance.now() - baseElapsed.current * 1000;
       const tick = () => {
-        const e = (performance.now() - startTsRef.current) / 1000;
-        elapsedRef.current = e; setElapsed(e);
+        const e = (performance.now()-startTsRef.current)/1000;
+        elapsedRef.current=e; setElapsed(e);
         rafRef.current = requestAnimationFrame(tick);
       };
       rafRef.current = requestAnimationFrame(tick);
@@ -289,70 +218,53 @@ export default function App() {
     return () => { cancelAnimationFrame(syncRafRef.current); cancelAnimationFrame(rafRef.current); };
   }, [playing, view, ytReady]);
 
-  // ── Active line ──
+  // Active line
   useEffect(() => {
     if (!active?.syncedLines) return;
     const lines = active.syncedLines;
     let idx = -1;
     for (let i = 0; i < lines.length; i++) {
-      if (lines[i].time <= elapsed + 0.15) idx = i;
-      else break;
+      if (lines[i].time <= elapsed+0.15) idx=i; else break;
     }
     if (idx !== activeIdx) setActiveIdx(idx);
   }, [elapsed, active]);
 
-  // ── Scroll to active ──
+  // Scroll to active
   useEffect(() => {
-    if (activeIdx < 0 || !scrollRef.current || !lineRefs.current[activeIdx]) return;
-    const container = scrollRef.current;
+    if (activeIdx<0||!scrollRef.current||!lineRefs.current[activeIdx]) return;
     const el = lineRefs.current[activeIdx];
-    smoothScrollTo(container, Math.max(0, el.offsetTop - container.clientHeight / 2 + el.clientHeight / 2));
+    smoothScrollTo(scrollRef.current, Math.max(0, el.offsetTop-scrollRef.current.clientHeight/2+el.clientHeight/2));
   }, [activeIdx]);
 
   // ── Actions ──
   async function startSing(song) {
-    // Properly clean up any existing player first
-    try { ytPlayerRef.current?.stopVideo?.(); } catch {}
-    try { ytPlayerRef.current?.destroy?.(); } catch {}
-    ytPlayerRef.current = null;
-    usingYT.current = false;
-    cancelAnimationFrame(rafRef.current);
-    cancelAnimationFrame(syncRafRef.current);
-
-    // Auto-fetch YouTube if not loaded yet
+    try { ytPlayerRef.current?.stopVideo?.(); ytPlayerRef.current?.destroy?.(); } catch {}
+    ytPlayerRef.current = null; usingYT.current = false;
+    cancelAnimationFrame(rafRef.current); cancelAnimationFrame(syncRafRef.current);
     let finalSong = song;
     if (!song.videoId) {
       try {
-        const r = await fetch(BACKEND + "/search?title=" + encodeURIComponent(song.title) + "&artist=" + encodeURIComponent(song.artist || ""));
+        const r = await fetch(BACKEND+"/search?title="+encodeURIComponent(song.title)+"&artist="+encodeURIComponent(song.artist||""));
         if (r.ok) {
           const data = await r.json();
           if (data.videoId) {
-            finalSong = { ...song, videoId: data.videoId, videoTitle: data.videoTitle, thumbnail: data.thumbnail };
-            setSongs(function(s) { return s.map(function(x) { return x.id === song.id ? finalSong : x; }); });
+            finalSong = { ...song, videoId:data.videoId, videoTitle:data.videoTitle, thumbnail:data.thumbnail };
+            setSongs(s => s.map(x => x.id===song.id ? finalSong : x));
           }
         }
       } catch {}
     }
-
-    // Reset all state
-    setActive(finalSong);
-    setElapsed(0); elapsedRef.current = 0; baseElapsed.current = 0; startTsRef.current = null;
-    setPlaying(false); setYtReady(false); setYtBlocked(false);
-    setActiveIdx(-1); setLocked(false); setShowVideo(true); setMuted(false);
+    setActive(finalSong); setElapsed(0); elapsedRef.current=0; baseElapsed.current=0; startTsRef.current=null;
+    setPlaying(false); setYtReady(false); setActiveIdx(-1); setLocked(false); setShowVideo(true); setMuted(false);
     lineRefs.current = [];
     setView("sing");
   }
 
   function stopSing() {
-    // Clean up properly to fix the grey screen bug
-    try { ytPlayerRef.current?.stopVideo?.(); } catch {}
-    try { ytPlayerRef.current?.destroy?.(); } catch {}
-    ytPlayerRef.current = null;
-    usingYT.current = false;
-    cancelAnimationFrame(rafRef.current);
-    cancelAnimationFrame(syncRafRef.current);
-    setPlaying(false); setActive(null);
-    setElapsed(0); elapsedRef.current = 0; baseElapsed.current = 0;
+    try { ytPlayerRef.current?.stopVideo?.(); ytPlayerRef.current?.destroy?.(); } catch {}
+    ytPlayerRef.current = null; usingYT.current = false;
+    cancelAnimationFrame(rafRef.current); cancelAnimationFrame(syncRafRef.current);
+    setPlaying(false); setActive(null); setElapsed(0); elapsedRef.current=0; baseElapsed.current=0;
     setYtReady(false); setActiveIdx(-1);
     setView("lib");
   }
@@ -361,60 +273,57 @@ export default function App() {
     vibrate(8);
     if (usingYT.current && ytPlayerRef.current) {
       try {
-        const state = ytPlayerRef.current.getPlayerState?.();
-        if (state === 1) { ytPlayerRef.current.pauseVideo(); setPlaying(false); baseElapsed.current = elapsedRef.current; }
+        const s = ytPlayerRef.current.getPlayerState?.();
+        if (s===1) { ytPlayerRef.current.pauseVideo(); setPlaying(false); baseElapsed.current=elapsedRef.current; }
         else { ytPlayerRef.current.playVideo(); setPlaying(true); }
       } catch {}
     } else {
-      if (!playing) { startTsRef.current = performance.now() - baseElapsed.current * 1000; setPlaying(true); }
-      else { baseElapsed.current = elapsedRef.current; setPlaying(false); }
+      if (!playing) { startTsRef.current=performance.now()-baseElapsed.current*1000; setPlaying(true); }
+      else { baseElapsed.current=elapsedRef.current; setPlaying(false); }
     }
   }
 
   function seek(delta) {
     vibrate(12);
     if (usingYT.current && ytPlayerRef.current) {
-      try { const c = ytPlayerRef.current.getCurrentTime?.() ?? 0; ytPlayerRef.current.seekTo(Math.max(0, c + delta), true); } catch {}
+      try { ytPlayerRef.current.seekTo(Math.max(0,(ytPlayerRef.current.getCurrentTime?.()??0)+delta),true); } catch {}
     } else {
-      const next = Math.max(0, elapsedRef.current + delta);
-      elapsedRef.current = next; baseElapsed.current = next;
-      startTsRef.current = performance.now() - next * 1000;
-      setElapsed(next);
+      const next = Math.max(0, elapsedRef.current+delta);
+      elapsedRef.current=next; baseElapsed.current=next;
+      startTsRef.current=performance.now()-next*1000; setElapsed(next);
     }
   }
 
   function seekToLine(line) {
     vibrate(10);
     if (usingYT.current && ytPlayerRef.current) {
-      try { ytPlayerRef.current.seekTo(line.time, true); ytPlayerRef.current.playVideo(); setPlaying(true); } catch {}
+      try { ytPlayerRef.current.seekTo(line.time,true); ytPlayerRef.current.playVideo(); setPlaying(true); } catch {}
     } else {
-      elapsedRef.current = line.time; baseElapsed.current = line.time;
-      startTsRef.current = performance.now() - line.time * 1000;
+      elapsedRef.current=line.time; baseElapsed.current=line.time;
+      startTsRef.current=performance.now()-line.time*1000;
       setElapsed(line.time); setPlaying(true);
     }
   }
 
   function toggleMute() {
     vibrate(8);
-    if (usingYT.current && ytPlayerRef.current) {
-      try {
-        if (muted) { ytPlayerRef.current.unMute(); setMuted(false); }
-        else { ytPlayerRef.current.mute(); setMuted(true); }
-      } catch {}
-    }
+    try {
+      if (muted) { ytPlayerRef.current?.unMute?.(); setMuted(false); }
+      else { ytPlayerRef.current?.mute?.(); setMuted(true); }
+    } catch {}
   }
 
   function openEdit(song = null) {
-    setForm(song ? { ...song } : emptyForm());
+    setForm(song ? {...song} : emptyForm());
     setEdit(song); setSearchMsg("");
-    setSq({ title: song?.title || "", artist: song?.artist || "" });
+    setSq({ title:song?.title||"", artist:song?.artist||"" });
     setView("edit");
   }
 
   function saveForm() {
-    if (!form.title?.trim() || (!form.lyrics?.trim() && !form.syncedLines)) return;
-    if (editTarget) setSongs(s => s.map(x => x.id === editTarget.id ? { ...x, ...form } : x));
-    else setSongs(s => [{ id: Date.now().toString(), ...form }, ...s]);
+    if (!form.title?.trim()||(!form.lyrics?.trim()&&!form.syncedLines)) return;
+    if (editTarget) setSongs(s=>s.map(x=>x.id===editTarget.id?{...x,...form}:x));
+    else setSongs(s=>[{id:Date.now().toString(),...form},...s]);
     setView("lib");
   }
 
@@ -422,12 +331,11 @@ export default function App() {
     if (!sq.title.trim()) return;
     setSearching(true); setSearchMsg("Recherche en cours...");
     try {
-      const url = `${BACKEND}/search?title=${encodeURIComponent(sq.title)}&artist=${encodeURIComponent(sq.artist)}`;
-      const r = await fetch(url);
+      const r = await fetch(BACKEND+"/search?title="+encodeURIComponent(sq.title)+"&artist="+encodeURIComponent(sq.artist));
       if (!r.ok) throw new Error();
       const data = await r.json();
       const synced = parseLRC(data.synced);
-      setForm(f => ({ ...f, title: data.title || sq.title, artist: data.artist || sq.artist, lyrics: data.plain || (synced?.map(l => l.text).join("\n") ?? ""), syncedLines: synced, videoId: data.videoId || null, videoTitle: data.videoTitle || null, thumbnail: data.thumbnail || null }));
+      setForm(f=>({...f, title:data.title||sq.title, artist:data.artist||sq.artist, lyrics:data.plain||(synced?.map(l=>l.text).join("\n")??""), syncedLines:synced, videoId:data.videoId||null, videoTitle:data.videoTitle||null, thumbnail:data.thumbnail||null}));
       const parts = [];
       if (synced) parts.push("✅ Paroles synchronisées");
       else if (data.plain) parts.push("⚠️ Paroles sans sync");
@@ -438,312 +346,160 @@ export default function App() {
     finally { setSearching(false); }
   }
 
-  function paste() {
-    navigator.clipboard?.readText?.().then(t => { if (t) setForm(f => ({ ...f, lyrics: t, syncedLines: null })); }).catch(() => {});
-  }
-
-  // ── Playlists ──
   function createPlaylist(name) {
     if (!name.trim()) return;
-    const pl = { id: Date.now().toString(), name: name.trim(), songIds: [], createdAt: Date.now() };
-    setPlaylists(p => [...p, pl]);
-    setNewPlaylistName(""); setShowPlaylistModal(false);
+    setPlaylists(p=>[...p,{id:Date.now().toString(),name:name.trim(),songIds:[],createdAt:Date.now()}]);
+    setNewPlaylistName(""); setShowNewPlaylist(false);
   }
 
-  function deletePlaylist(id) { setPlaylists(p => p.filter(x => x.id !== id)); }
-
-  function addSongToPlaylist(playlistId, songId) {
-    setPlaylists(p => p.map(pl => pl.id === playlistId
-      ? { ...pl, songIds: pl.songIds.includes(songId) ? pl.songIds : [...pl.songIds, songId] }
-      : pl
-    ));
+  function addSongToPlaylist(plId, songId) {
+    setPlaylists(p=>p.map(pl=>pl.id===plId?{...pl,songIds:pl.songIds.includes(songId)?pl.songIds:[...pl.songIds,songId]}:pl));
     setAddToPlaylistSong(null);
   }
 
-  function removeSongFromPlaylist(playlistId, songId) {
-    setPlaylists(p => p.map(pl => pl.id === playlistId
-      ? { ...pl, songIds: pl.songIds.filter(id => id !== songId) }
-      : pl
-    ));
-  }
-
-  // ── Spotify ──
-  async function connectSpotify() {
-    if (!spotifyClientId.trim()) return;
-    localStorage.setItem("spotify_client_id_saved", spotifyClientId);
-    await startSpotifyAuth(spotifyClientId);
-  }
-
-  async function redeemManualCode() {
-    if (!manualCode.trim()) return;
-    setManualCodeLoading(true);
-    setSpotifyError("");
-    try {
-      const r = await fetch(`${BACKEND}/token/${manualCode.trim()}`);
-      if (!r.ok) { setSpotifyError("Code invalide ou expiré. Réessaie."); return; }
-      const data = await r.json();
-      if (!data?.access_token) { setSpotifyError("Code invalide."); return; }
-      const expiresAt = Date.now() + (data.expires_in || 3600) * 1000;
-      localStorage.setItem("spotify_token", JSON.stringify({
-        access_token: data.access_token,
-        refresh_token: data.refresh_token || "",
-        expires: expiresAt,
-      }));
-      setSpotifyToken(data.access_token);
-      setManualCode("");
-    } catch { setSpotifyError("Erreur réseau. Réessaie."); }
-    finally { setManualCodeLoading(false); }
-  }
-
-  async function loadSpotifyPlaylists() {
-    let token = null;
-    try { token = spotifyToken || getSpotifyToken(); } catch {}
-    if (!token) {
-      setSpotifyLoading(false);
-      setSpotifyError("Token manquant. Reconnecte-toi.");
-      return;
+  async function handleCSV(file) {
+    if (!file) return;
+    const playlistName = file.name.replace(".csv","").replace(/_/g," ");
+    const text = await file.text();
+    const lines = text.split("\n").filter(l=>l.trim());
+    if (lines.length<2) { alert("Fichier vide ou invalide"); return; }
+    const headers = lines[0].split(",").map(h=>h.replace(/"/g,"").trim());
+    const titleIdx = headers.indexOf("Track Name");
+    const artistIdx = headers.indexOf("Artist Name(s)");
+    if (titleIdx===-1) { alert("Format invalide — colonne Track Name introuvable"); return; }
+    const tracks = [];
+    for (let i=1;i<lines.length;i++) {
+      const cols=[]; let cur="",inQ=false;
+      for (let c=0;c<lines[i].length;c++) {
+        const ch=lines[i][c];
+        if (ch==='"'){inQ=!inQ;}
+        else if (ch===','&&!inQ){cols.push(cur.trim());cur="";}
+        else{cur+=ch;}
+      }
+      cols.push(cur.trim());
+      const title=cols[titleIdx]||"";
+      const artist=artistIdx!==-1?(cols[artistIdx]||""):"";
+      if (title) tracks.push({title,artist:artist.split(";")[0]});
     }
-    setSpotifyLoading(true);
-    setSpotifyError("");
-    setSpotifyPlaylists([]);
-    try {
-      const r = await fetch("https://api.spotify.com/v1/me/playlists?limit=50", {
-        headers: { Authorization: "Bearer " + token }
-      });
-      if (r.status === 401) {
-        try { localStorage.removeItem("spotify_token"); } catch {}
-        setSpotifyToken(null);
-        setSpotifyLoading(false);
-        setSpotifyError("Session expirée. Reconnecte-toi.");
-        return;
-      }
-      if (!r.ok) {
-        setSpotifyLoading(false);
-        setSpotifyError("Erreur " + r.status + ". Reconnecte-toi.");
-        return;
-      }
-      let data = null;
-      try { data = await r.json(); } catch {
-        setSpotifyLoading(false);
-        setSpotifyError("Erreur de lecture. Reconnecte-toi.");
-        return;
-      }
-      setSpotifyPlaylists(Array.isArray(data?.items) ? data.items : []);
-    } catch(e) {
-      setSpotifyError("Erreur réseau. Reconnecte-toi.");
-    }
-    setSpotifyLoading(false);
-  }
-
-  useEffect(() => {
-    if (view === "spotify" && spotifyToken) {
-      try { loadSpotifyPlaylists(); } catch {}
-    }
-  }, [view, spotifyToken]);
-
-  async function importSpotifyPlaylist(spPlaylist) {
-    const token = spotifyToken || getSpotifyToken();
-    if (!token) { alert("Token manquant, reconnecte-toi"); return; }
-    if (!spPlaylist || !spPlaylist.id) { alert("ID playlist manquant"); return; }
-    setImportingPlaylist(spPlaylist.id);
-    setImportProgress({ done: 0, total: 0 });
-
-    try {
-      // Get all tracks
-      let tracks = [];
-      // Use href from Spotify directly if available, otherwise build URL
-      let url = (spPlaylist.href ? spPlaylist.href + "/tracks" : "https://api.spotify.com/v1/playlists/" + spPlaylist.id + "/tracks") + "?limit=50";
-      let pageCount = 0;
-      while (url && pageCount < 20) {
-        pageCount++;
-        const r = await fetch(url, { headers: { Authorization: "Bearer " + token } });
-        if (!r.ok) {
-          alert("Erreur tracks HTTP " + r.status + " pour " + spPlaylist.name);
-          break;
-        }
-        const data = await r.json();
-        const items = (data.items || []).filter(function(i) { return i && i.track && i.track.name; });
-        items.forEach(function(i) {
-          tracks.push({
-            title: i.track.name,
-            artist: (i.track.artists && i.track.artists.length > 0) ? i.track.artists[0].name : ""
-          });
-        });
-        url = data.next || null;
-      }
-      if (tracks.length === 0) {
-        alert("Aucun titre trouvé dans " + spPlaylist.name + ". Playlist vide ou privée ?");
-        setImportingPlaylist(null);
-        return;
-      }
-      // Create playlist in app
-      const playlistId = Date.now().toString();
-      const newPlaylist = { id: playlistId, name: spPlaylist.name, songIds: [], createdAt: Date.now(), fromSpotify: true };
-
-      // Fetch lyrics + video for each track
-      const newSongs = [];
-      for (let i = 0; i < tracks.length; i++) {
-        const { title, artist } = tracks[i];
-        setImportProgress({ done: i, total: tracks.length });
+    if (tracks.length===0){alert("Aucun titre trouvé");return;}
+    if (!window.confirm("Importer "+tracks.length+" titres dans "+playlistName+"?")) return;
+    setImportProgress({done:0,total:tracks.length,active:true});
+    const playlistId = Date.now().toString();
+    const newPlaylist = {id:playlistId,name:playlistName,songIds:[],createdAt:Date.now(),fromSpotify:true};
+    const newSongs = [];
+    const BATCH=10;
+    for (let b=0;b<tracks.length;b+=BATCH) {
+      const batch=tracks.slice(b,b+BATCH);
+      const results = await Promise.all(batch.map(async(track,j)=>{
+        const idx=b+j;
         try {
-          const r = await fetch(`${BACKEND}/search?title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`);
-          if (r.ok) {
-            const data = await r.json();
-            const synced = parseLRC(data.synced);
-            const song = {
-              id: `sp_${Date.now()}_${i}`,
-              title: data.title || title,
-              artist: data.artist || artist,
-              lyrics: data.plain || (synced?.map(l => l.text).join("\n") ?? ""),
-              syncedLines: synced,
-              videoId: data.videoId || null,
-              videoTitle: data.videoTitle || null,
-              thumbnail: data.thumbnail || null,
-              fontSize: 24,
-            };
-            newSongs.push(song);
-            newPlaylist.songIds.push(song.id);
-          } else {
-            // Add song without lyrics
-            const song = { id: `sp_${Date.now()}_${i}`, title, artist, lyrics: "", syncedLines: null, videoId: null, fontSize: 24 };
-            newSongs.push(song);
-            newPlaylist.songIds.push(song.id);
+          const r=await fetch(BACKEND+"/lyrics?title="+encodeURIComponent(track.title)+"&artist="+encodeURIComponent(track.artist));
+          if (r.ok){
+            const data=await r.json();
+            const synced=parseLRC(data.synced);
+            return {id:"csv_"+Date.now()+"_"+idx,title:data.title||track.title,artist:data.artist||track.artist,lyrics:data.plain||(synced?synced.map(l=>l.text).join("\n"):""),syncedLines:synced,videoId:null,thumbnail:null,fontSize:24};
           }
-        } catch {
-          const song = { id: `sp_${Date.now()}_${i}`, title, artist, lyrics: "", syncedLines: null, videoId: null, fontSize: 24 };
-          newSongs.push(song);
-          newPlaylist.songIds.push(song.id);
-        }
-        // Small delay to avoid rate limiting
-        await new Promise(r => setTimeout(r, 300));
-      }
-
-      setSongs(s => [...s, ...newSongs]);
-      setPlaylists(p => [...p, newPlaylist]);
-      setImportProgress({ done: tracks.length, total: tracks.length });
-      setTimeout(() => { setImportingPlaylist(null); setView("lib"); }, 1500);
-    } catch {
-      setSpotifyError("Erreur lors de l'import.");
-      setImportingPlaylist(null);
+        } catch {}
+        return {id:"csv_"+Date.now()+"_"+idx,title:track.title,artist:track.artist,lyrics:"",syncedLines:null,videoId:null,fontSize:24};
+      }));
+      results.forEach(s=>{newSongs.push(s);newPlaylist.songIds.push(s.id);});
+      setImportProgress({done:Math.min(b+BATCH,tracks.length),total:tracks.length,active:true});
     }
+    setSongs(s=>[...s,...newSongs]);
+    setPlaylists(p=>[...p,newPlaylist]);
+    setImportProgress({done:tracks.length,total:tracks.length,active:false});
+    alert("Import terminé ! "+newSongs.length+" chansons dans "+playlistName);
+    setTab("library"); setView("lib");
   }
 
-  const filtered = songs.filter(s =>
-    (activePlaylist ? activePlaylist.songIds.includes(s.id) : true) &&
-    (s.title.toLowerCase().includes(search.toLowerCase()) || (s.artist || "").toLowerCase().includes(search.toLowerCase()))
+  const allFiltered = songs.filter(s =>
+    s.title.toLowerCase().includes(globalSearch.toLowerCase()) ||
+    (s.artist||"").toLowerCase().includes(globalSearch.toLowerCase())
   );
+
+  const playlistSongs = activePlaylist ? songs.filter(s=>activePlaylist.songIds.includes(s.id)) : [];
 
   // ════════════════════════════════════════════════════════════════════════════
   // SING VIEW
   // ════════════════════════════════════════════════════════════════════════════
   if (view === "sing" && active) {
-    const lines    = active.syncedLines;
+    const lines = active.syncedLines;
     const hasSynced = !!lines;
-    const fontSize  = active.fontSize ?? 24;
-    const hasYT     = !!active.videoId;
-
+    const fontSize = active.fontSize ?? 24;
+    const hasYT = !!active.videoId;
     return (
       <div style={S.singWrap}>
-        <style>{globalCSS}</style>
-
+        <style>{CSS}</style>
+        {/* Bar */}
         <div style={S.singBar}>
-          {!locked ? (
-            <>
-              <Btn onClick={stopSing} style={S.iconBtn}>✕</Btn>
-              <div style={{ flex: 1, minWidth: 0, padding: "0 4px" }}>
-                <div style={S.singTitle}>{active.title}</div>
-                {active.artist && <div style={S.singArtist}>{active.artist}</div>}
-              </div>
-              {hasYT && <Btn onClick={() => setShowVideo(v => !v)} style={{ ...S.iconBtn, color: showVideo ? GOLD : "#aaa" }}>{showVideo ? "🎬" : "🎵"}</Btn>}
-              {hasYT && <Btn onClick={toggleMute} style={{ ...S.iconBtn, color: muted ? "#e07070" : "#aaa" }}>{muted ? "🔇" : "🔊"}</Btn>}
-              <Btn onClick={() => seek(-5)} style={S.iconBtn}>−5s</Btn>
-              <Btn onClick={togglePlay} style={{ ...S.playBtn, background: playing ? GOLD : "#232630" }}>
-                <span style={{ color: playing ? "#000" : "#fff", fontSize: 22 }}>{playing ? "⏸" : "▶"}</span>
-              </Btn>
-              <Btn onClick={() => seek(5)} style={S.iconBtn}>+5s</Btn>
-              <Btn onClick={() => { vibrate(20); setLocked(true); }} style={S.iconBtn}>🔒</Btn>
-            </>
-          ) : (
-            <>
-              <span style={{ color: "#555", fontSize: 12, flex: 1 }}>🔒 Verrouillé</span>
-              <Btn onClick={togglePlay} style={{ ...S.playBtn, background: playing ? GOLD : "#232630" }}>
-                <span style={{ color: playing ? "#000" : "#fff", fontSize: 22 }}>{playing ? "⏸" : "▶"}</span>
-              </Btn>
-              <Btn onClick={() => { vibrate(20); setLocked(false); }} style={{ ...S.iconBtn, color: GOLD }}>🔓</Btn>
-            </>
-          )}
+          {!locked ? <>
+            <Btn onClick={stopSing} style={S.singBack}>✕</Btn>
+            <div style={{flex:1,minWidth:0,padding:"0 8px"}}>
+              <div style={S.singTitle}>{active.title}</div>
+              {active.artist&&<div style={S.singArtist}>{active.artist}</div>}
+            </div>
+            {hasYT&&<Btn onClick={()=>setShowVideo(v=>!v)} style={{...S.singIcon,color:showVideo?"#1DB954":"#535353"}}>{showVideo?"🎬":"🎵"}</Btn>}
+            {hasYT&&<Btn onClick={toggleMute} style={{...S.singIcon,color:muted?"#f15e6c":"#535353"}}>{muted?"🔇":"🔊"}</Btn>}
+            <Btn onClick={()=>seek(-5)} style={S.singIcon}>−5s</Btn>
+            <Btn onClick={togglePlay} style={{...S.singPlay,background:playing?"#1DB954":"#282828"}}>
+              <span style={{color:playing?"#000":"#fff",fontSize:20}}>{playing?"⏸":"▶"}</span>
+            </Btn>
+            <Btn onClick={()=>seek(5)} style={S.singIcon}>+5s</Btn>
+            <Btn onClick={()=>{vibrate(20);setLocked(true);}} style={S.singIcon}>🔒</Btn>
+          </> : <>
+            <span style={{color:"#535353",fontSize:12,flex:1}}>🔒 Verrouillé</span>
+            <Btn onClick={togglePlay} style={{...S.singPlay,background:playing?"#1DB954":"#282828"}}>
+              <span style={{color:playing?"#000":"#fff",fontSize:20}}>{playing?"⏸":"▶"}</span>
+            </Btn>
+            <Btn onClick={()=>{vibrate(20);setLocked(false);}} style={{...S.singIcon,color:"#1DB954"}}>🔓</Btn>
+          </>}
         </div>
-
-        {hasYT && (
-          <div style={{ ...S.ytWrap, height: showVideo ? 200 : 0, overflow: "hidden", transition: "height 0.3s ease" }}>
-            <div id="yt-player" style={{ width: "100%", height: "100%" }} />
-          </div>
-        )}
-
-        <div style={S.timerBar}>
-          <span style={{ fontFamily: "monospace", fontSize: 13, color: "#555" }}>{fmt(elapsed)}</span>
-          {!playing && elapsed < 0.5 && (
-            <span style={{ color: "#333", fontSize: 11, marginLeft: 10, animation: "pulse 2s infinite" }}>
-              {hasYT ? "Appuie sur ▶ pour démarrer" : "Lance ta musique puis appuie sur ▶"}
-            </span>
-          )}
+        {/* YouTube */}
+        {hasYT&&<div style={{...S.ytWrap,height:showVideo?200:0}}><div id="yt-player" style={{width:"100%",height:"100%"}}/></div>}
+        {/* Timer */}
+        <div style={S.timerRow}>
+          <span style={{fontFamily:"monospace",fontSize:12,color:"#535353"}}>{fmt(elapsed)}</span>
+          {!playing&&elapsed<0.5&&<span style={{color:"#535353",fontSize:11,marginLeft:10,animation:"pulse 2s infinite"}}>{hasYT?"Appuie sur ▶":"Lance ta musique puis ▶"}</span>}
         </div>
-
+        {/* Lyrics */}
         <div ref={scrollRef} style={S.lyricsScroll}>
-          <div style={S.fadeTop} />
-          <div style={S.fadeBot} />
-          <div style={{ padding: "80px 16px 200px" }}>
-            {hasSynced ? (() => {
-              const introGap      = lines[0]?.time ?? 0;
-              const introProgress = introGap > 1.5 ? Math.min(1, elapsed / introGap) : 1;
-              const introIsPast   = elapsed >= (lines[0]?.time ?? 0);
-              return (
-                <>
-                  {introGap > 1.5 && (
-                    <div style={{ margin: "0 auto 20px", maxWidth: 240, height: 3, background: "#1a1d28", borderRadius: 3, overflow: "hidden" }}>
-                      <div style={{ height: "100%", width: `${introProgress * 100}%`, background: introIsPast ? "#2a2d38" : GOLD, borderRadius: 3, transition: "none" }} />
-                    </div>
-                  )}
-                  {lines.map((line, i) => {
-                    const isCurrent = i === activeIdx;
-                    const isPast    = i < activeIdx;
-                    const isNext    = i === activeIdx + 1;
-                    const nextLine  = lines[i + 1];
-                    const gap       = nextLine ? nextLine.time - line.time : 0;
-                    const barProg   = (gap > 1.5 && isCurrent) ? Math.min(1, (elapsed - line.time) / gap) : 0;
-                    return (
-                      <div key={i}>
-                        <div
-                          ref={el => lineRefs.current[i] = el}
-                          onClick={() => seekToLine(line)}
-                          style={{
-                            textAlign: "center", maxWidth: 580, margin: "0 auto", padding: "5px 8px",
-                            fontSize: isCurrent ? fontSize : isNext ? Math.round(fontSize * 0.85) : Math.round(fontSize * 0.68),
-                            fontWeight: isCurrent ? 700 : isNext ? 500 : 400,
-                            color: isCurrent ? GOLD : isPast ? "#222530" : isNext ? "#5a5e6a" : "#3a3e4a",
-                            transition: "font-size 0.2s ease, color 0.2s ease",
-                            lineHeight: 1.5, letterSpacing: isCurrent ? "0.02em" : "normal",
-                            cursor: "pointer", WebkitTapHighlightColor: "transparent",
-                          }}
-                        >{line.text}</div>
-                        {gap > 1.5 && (
-                          <div style={{ margin: "10px auto", maxWidth: 240, height: 3, background: "#1a1d28", borderRadius: 3, overflow: "hidden" }}>
-                            <div style={{ height: "100%", width: isPast ? "100%" : isCurrent ? `${barProg * 100}%` : "0%", background: isPast ? "#2a2d38" : GOLD, borderRadius: 3, transition: "none" }} />
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </>
-              );
-            })() : (
-              active.lyrics?.split("\n").map((line, i) => (
-                <div key={i} style={{ textAlign: "center", fontSize, color: "#f0e8d0", padding: "3px 16px", lineHeight: 1.65, maxWidth: 560, margin: "0 auto" }}>
-                  {line || <span style={{ opacity: 0 }}>·</span>}
-                </div>
-              ))
-            )}
-            <div style={{ height: 120 }} />
+          <div style={S.fadeTop}/>
+          <div style={S.fadeBot}/>
+          <div style={{padding:"80px 16px 200px"}}>
+            {hasSynced ? (()=>{
+              const introGap=lines[0]?.time??0;
+              const introProgress=introGap>1.5?Math.min(1,elapsed/introGap):1;
+              const introIsPast=elapsed>=(lines[0]?.time??0);
+              return <>
+                {introGap>1.5&&<div style={{margin:"0 auto 20px",maxWidth:160,height:2,background:"#282828",borderRadius:2,overflow:"hidden"}}>
+                  <div style={{height:"100%",width:`${introProgress*100}%`,background:introIsPast?"#282828":"#1DB954",borderRadius:2,transition:"none"}}/>
+                </div>}
+                {lines.map((line,i)=>{
+                  const isCurrent=i===activeIdx,isPast=i<activeIdx,isNext=i===activeIdx+1;
+                  const nextLine=lines[i+1],gap=nextLine?nextLine.time-line.time:0;
+                  const barProg=(gap>1.5&&isCurrent)?Math.min(1,(elapsed-line.time)/gap):0;
+                  return <div key={i}>
+                    <div ref={el=>lineRefs.current[i]=el} onClick={()=>seekToLine(line)} style={{
+                      textAlign:"center",maxWidth:580,margin:"0 auto",padding:"4px 8px",
+                      fontSize:isCurrent?fontSize:isNext?Math.round(fontSize*.85):Math.round(fontSize*.65),
+                      fontWeight:isCurrent?700:isNext?500:400,
+                      color:isCurrent?"#fff":isPast?"#282828":isNext?"#727272":"#535353",
+                      transition:"font-size .2s ease,color .2s ease",
+                      lineHeight:1.5,letterSpacing:isCurrent?"0.01em":"normal",cursor:"pointer",
+                      fontFamily:"'Circular Std','Helvetica Neue',sans-serif",
+                    }}>{line.text}</div>
+                    {gap>1.5&&<div style={{margin:"8px auto",maxWidth:160,height:2,background:"#282828",borderRadius:2,overflow:"hidden"}}>
+                      <div style={{height:"100%",width:isPast?"100%":isCurrent?`${barProg*100}%`:"0%",background:isPast?"#282828":"#1DB954",borderRadius:2,transition:"none"}}/>
+                    </div>}
+                  </div>;
+                })}
+              </>;
+            })() : active.lyrics?.split("\n").map((line,i)=>(
+              <div key={i} style={{textAlign:"center",fontSize,color:"#fff",padding:"3px 16px",lineHeight:1.65,maxWidth:560,margin:"0 auto",fontFamily:"'Circular Std','Helvetica Neue',sans-serif"}}>
+                {line||<span style={{opacity:0}}>·</span>}
+              </div>
+            ))}
+            <div style={{height:120}}/>
           </div>
         </div>
       </div>
@@ -751,199 +507,52 @@ export default function App() {
   }
 
   // ════════════════════════════════════════════════════════════════════════════
-  // SPOTIFY VIEW (CSV Import)
-  // ════════════════════════════════════════════════════════════════════════════
-  if (view === "spotify") {
-    return (
-      <div style={S.page}>
-        <style>{globalCSS}</style>
-        <div style={S.editHeader}>
-          <Btn onClick={() => setView("lib")} style={S.backBtn}>← Retour</Btn>
-          <span style={S.pageTitle}>🎵 Importer Spotify</span>
-        </div>
-        <div style={S.editBody}>
-
-          {/* Instructions */}
-          <div style={{ background:"#0e1a10", border:"1px solid #1DB95444", borderRadius:14, padding:16, marginBottom:16 }}>
-            <div style={{ fontSize:11, letterSpacing:"0.15em", color:"#1DB954", textTransform:"uppercase", marginBottom:10 }}>Comment faire</div>
-            <div style={{ color:TEXT, fontSize:14, lineHeight:1.7 }}>
-              <div style={{ marginBottom:6 }}>1️⃣ Va sur <span style={{ color:GOLD }}>exportify.net</span> dans Safari</div>
-              <div style={{ marginBottom:6 }}>2️⃣ Connecte-toi avec Spotify</div>
-              <div style={{ marginBottom:6 }}>3️⃣ Exporte la playlist en CSV</div>
-              <div>4️⃣ Reviens ici et importe le fichier</div>
-            </div>
-          </div>
-
-          {/* CSV Import */}
-          <div style={{ background:CARD, border:"1px solid " + BORDER, borderRadius:14, padding:16, marginBottom:16 }}>
-            <div style={{ fontSize:11, letterSpacing:"0.15em", color:GOLD, textTransform:"uppercase", marginBottom:12 }}>Importer un fichier CSV</div>
-            <label style={{ display:"block", width:"100%", background:"#1DB954", color:"#fff", borderRadius:12, padding:"14px", fontSize:15, fontWeight:700, textAlign:"center", cursor:"pointer" }}>
-              📁 Choisir un fichier CSV
-              <input type="file" accept=".csv" style={{ display:"none" }} onChange={async (e) => {
-                const file = e.target.files && e.target.files[0];
-                if (!file) return;
-                const playlistName = file.name.replace(".csv", "").replace(/_/g, " ");
-                const text = await file.text();
-                const lines = text.split("\n").filter(l => l.trim());
-                if (lines.length < 2) { alert("Fichier vide ou invalide"); return; }
-
-                // Parse header to find Track Name and Artist columns
-                const headers = lines[0].split(",").map(h => h.replace(/"/g, "").trim());
-                const titleIdx = headers.indexOf("Track Name");
-                const artistIdx = headers.indexOf("Artist Name(s)");
-                if (titleIdx === -1) { alert("Format CSV invalide — colonne 'Track Name' introuvable"); return; }
-
-                // Parse tracks
-                const tracks = [];
-                for (let i = 1; i < lines.length; i++) {
-                  // Handle CSV with quoted fields
-                  const cols = [];
-                  let current = "";
-                  let inQuotes = false;
-                  for (let c = 0; c < lines[i].length; c++) {
-                    const ch = lines[i][c];
-                    if (ch === '"') { inQuotes = !inQuotes; }
-                    else if (ch === ',' && !inQuotes) { cols.push(current.trim()); current = ""; }
-                    else { current += ch; }
-                  }
-                  cols.push(current.trim());
-                  const title = cols[titleIdx] || "";
-                  const artist = artistIdx !== -1 ? (cols[artistIdx] || "") : "";
-                  if (title) tracks.push({ title, artist: artist.split(";")[0] });
-                }
-
-                if (tracks.length === 0) { alert("Aucun titre trouvé dans le CSV"); return; }
-
-                // Confirm import
-                if (!window.confirm("Importer " + tracks.length + " titres dans " + playlistName + " ? Cela peut prendre quelques minutes.")) return;
-
-                // Create playlist and import
-                setImportingPlaylist("csv");
-                setImportProgress({ done: 0, total: tracks.length });
-
-                const playlistId = Date.now().toString();
-                const newPlaylist = { id: playlistId, name: playlistName, songIds: [], createdAt: Date.now(), fromSpotify: true };
-                const newSongs = [];
-
-                // Import en parallèle par batch de 5 — 5x plus rapide
-                const BATCH = 10;
-                let done = 0;
-                for (let b = 0; b < tracks.length; b += BATCH) {
-                  const batch = tracks.slice(b, b + BATCH);
-                  const results = await Promise.all(batch.map(async function(track, j) {
-                    const idx = b + j;
-                    try {
-                      // Import only fetches lyrics — YouTube loads on first play
-                      const r = await fetch(BACKEND + "/lyrics?title=" + encodeURIComponent(track.title) + "&artist=" + encodeURIComponent(track.artist));
-                      if (r.ok) {
-                        const data = await r.json();
-                        const synced = parseLRC(data.synced);
-                        return {
-                          id: "csv_" + Date.now() + "_" + idx,
-                          title: data.title || track.title,
-                          artist: data.artist || track.artist,
-                          lyrics: data.plain || (synced ? synced.map(function(l) { return l.text; }).join("\n") : ""),
-                          syncedLines: synced,
-                          videoId: null, // loaded on first play
-                          videoTitle: null,
-                          thumbnail: null,
-                          fontSize: 24,
-                        };
-                      }
-                    } catch {}
-                    return { id: "csv_" + Date.now() + "_" + idx, title: track.title, artist: track.artist, lyrics: "", syncedLines: null, videoId: null, fontSize: 24 };
-                  }));
-                  done += results.length;
-                  setImportProgress({ done, total: tracks.length });
-                  results.forEach(function(song) {
-                    newSongs.push(song);
-                    newPlaylist.songIds.push(song.id);
-                  });
-                }
-
-                setSongs(function(s) { return [...s, ...newSongs]; });
-                setPlaylists(function(p) { return [...p, newPlaylist]; });
-                setImportingPlaylist(null);
-                alert("Import terminé ! " + newSongs.length + " chansons dans " + playlistName);
-                setView("lib");
-              }} />
-            </label>
-          </div>
-
-          {/* Import progress */}
-          {importingPlaylist === "csv" && (
-            <div style={{ background:CARD, border:"1px solid " + BORDER, borderRadius:14, padding:16 }}>
-              <div style={{ color:TEXT, fontSize:14, marginBottom:10 }}>
-                Import en cours... {importProgress.done}/{importProgress.total}
-              </div>
-              <div style={{ height:4, background:"#1a1d28", borderRadius:4, overflow:"hidden" }}>
-                <div style={{ height:"100%", width: (importProgress.total > 0 ? Math.round(importProgress.done / importProgress.total * 100) : 0) + "%", background:"#1DB954", borderRadius:4, transition:"width 0.3s ease" }} />
-              </div>
-            </div>
-          )}
-
-        </div>
-      </div>
-    );
-  }
-
-    // ════════════════════════════════════════════════════════════════════════════
   // EDIT VIEW
   // ════════════════════════════════════════════════════════════════════════════
   if (view === "edit") {
-    const ok = form.title?.trim() && (form.lyrics?.trim() || form.syncedLines);
+    const ok = form.title?.trim()&&(form.lyrics?.trim()||form.syncedLines);
     return (
       <div style={S.page}>
-        <style>{globalCSS}</style>
-        <div style={S.editHeader}>
-          <Btn onClick={() => setView("lib")} style={S.backBtn}>← Retour</Btn>
-          <span style={S.pageTitle}>{editTarget ? "Modifier" : "Nouvelle chanson"}</span>
+        <style>{CSS}</style>
+        <div style={S.subHeader}>
+          <Btn onClick={()=>setView("lib")} style={S.backBtn}>←</Btn>
+          <span style={S.subTitle}>{editTarget?"Modifier":"Nouvelle chanson"}</span>
         </div>
-        <div style={S.editBody}>
-          <div style={S.searchBox}>
-            <div style={S.searchBoxLabel}>🔍 Recherche automatique</div>
-            <input value={sq.title} onChange={e => setSq(q => ({ ...q, title: e.target.value }))} onKeyDown={e => e.key === "Enter" && fetchAll()} placeholder="Titre *" style={S.input} />
-            <input value={sq.artist} onChange={e => setSq(q => ({ ...q, artist: e.target.value }))} onKeyDown={e => e.key === "Enter" && fetchAll()} placeholder="Artiste (recommandé)" style={{ ...S.input, marginTop: 8 }} />
-            <Btn onClick={fetchAll} style={{ ...S.searchBtn, background: searching ? "#1c2030" : GOLD, color: searching ? "#555" : "#000" }}>
-              {searching ? "Recherche..." : "🎵 Trouver paroles + vidéo"}
+        <div style={S.scrollBody}>
+          {/* Auto search */}
+          <div style={S.searchCard}>
+            <div style={S.cardLabel}>🔍 RECHERCHE AUTOMATIQUE</div>
+            <input value={sq.title} onChange={e=>setSq(q=>({...q,title:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&fetchAll()} placeholder="Titre *" style={S.spotInput}/>
+            <input value={sq.artist} onChange={e=>setSq(q=>({...q,artist:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&fetchAll()} placeholder="Artiste (recommandé)" style={{...S.spotInput,marginTop:8}}/>
+            <Btn onClick={fetchAll} style={{...S.greenBtn,width:"100%",marginTop:10,opacity:searching?.6:1}}>
+              {searching?"Recherche...":"🎵 Trouver paroles + vidéo"}
             </Btn>
-            {searchMsg && <div style={{ marginTop: 10, fontSize: 13, lineHeight: 1.5, color: "#aaa" }}>{searchMsg}</div>}
+            {searchMsg&&<div style={{marginTop:10,fontSize:13,color:"#b3b3b3",lineHeight:1.5}}>{searchMsg}</div>}
           </div>
-
-          {form.videoId && (
-            <div style={{ marginTop: 12, borderRadius: 12, overflow: "hidden", border: `1px solid ${BORDER}` }}>
-              <img src={form.thumbnail} alt="" style={{ width: "100%", display: "block" }} />
-              <div style={{ background: CARD, padding: "8px 12px", fontSize: 12, color: "#888" }}>🎬 {form.videoTitle}</div>
-            </div>
-          )}
-
+          {form.videoId&&<div style={{marginTop:12,borderRadius:8,overflow:"hidden"}}>
+            <img src={form.thumbnail} alt="" style={{width:"100%",display:"block"}}/>
+            <div style={{background:"#282828",padding:"8px 12px",fontSize:12,color:"#727272"}}>🎬 {form.videoTitle}</div>
+          </div>}
           <div style={S.divider}>— ou entre les paroles manuellement —</div>
-
-          <label style={S.label}>Titre *</label>
-          <input value={form.title || ""} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder="Ex : Bohemian Rhapsody" style={S.input} />
-
-          <label style={S.label}>Artiste</label>
-          <input value={form.artist || ""} onChange={e => setForm(f => ({ ...f, artist: e.target.value }))} placeholder="Ex : Queen" style={S.input} />
-
-          <label style={S.label}>Paroles</label>
-          <div style={{ position: "relative" }}>
-            <textarea value={form.lyrics || ""} rows={10} onChange={e => setForm(f => ({ ...f, lyrics: e.target.value, syncedLines: null }))}
-              placeholder={"Colle les paroles ici...\n\nLigne vide = pause entre strophes."}
-              style={{ ...S.input, resize: "none", fontFamily: "monospace", fontSize: 13, lineHeight: 1.6, paddingTop: 46 }} />
-            <Btn onClick={paste} style={S.pasteBtn}>📋 Coller</Btn>
+          <label style={S.spotLabel}>TITRE *</label>
+          <input value={form.title||""} onChange={e=>setForm(f=>({...f,title:e.target.value}))} placeholder="Ex : Bohemian Rhapsody" style={S.spotInput}/>
+          <label style={S.spotLabel}>ARTISTE</label>
+          <input value={form.artist||""} onChange={e=>setForm(f=>({...f,artist:e.target.value}))} placeholder="Ex : Queen" style={S.spotInput}/>
+          <label style={S.spotLabel}>PAROLES</label>
+          <div style={{position:"relative"}}>
+            <textarea value={form.lyrics||""} rows={10} onChange={e=>setForm(f=>({...f,lyrics:e.target.value,syncedLines:null}))}
+              placeholder={"Colle les paroles ici..."} style={{...S.spotInput,resize:"none",fontFamily:"monospace",fontSize:13,lineHeight:1.6,paddingTop:46}}/>
+            <Btn onClick={()=>{navigator.clipboard?.readText?.().then(t=>{if(t)setForm(f=>({...f,lyrics:t,syncedLines:null}));}).catch(()=>{});}} style={S.pasteBtn}>📋 Coller</Btn>
           </div>
-
-          {form.syncedLines && <div style={S.syncBadge}>✅ {form.syncedLines.length} lignes synchronisées — karaoké disponible !</div>}
-
-          <label style={S.label}>Taille du texte — <span style={{ color: GOLD }}>{form.fontSize ?? 24}px</span></label>
-          <div style={S.sliderRow}>
-            <span style={{ fontSize: 13, color: MUTED }}>A</span>
-            <input type="range" min={16} max={40} value={form.fontSize ?? 24} onChange={e => setForm(f => ({ ...f, fontSize: Number(e.target.value) }))} style={{ flex: 1, accentColor: GOLD }} />
-            <span style={{ fontSize: 22, color: MUTED }}>A</span>
+          {form.syncedLines&&<div style={S.syncBadge}>✅ {form.syncedLines.length} lignes synchronisées</div>}
+          <label style={S.spotLabel}>TAILLE DU TEXTE — <span style={{color:"#1DB954"}}>{form.fontSize??24}px</span></label>
+          <div style={{display:"flex",alignItems:"center",gap:10,margin:"8px 0 4px"}}>
+            <span style={{fontSize:13,color:"#727272"}}>A</span>
+            <input type="range" min={16} max={40} value={form.fontSize??24} onChange={e=>setForm(f=>({...f,fontSize:Number(e.target.value)}))} style={{flex:1,accentColor:"#1DB954"}}/>
+            <span style={{fontSize:22,color:"#727272"}}>A</span>
           </div>
-
-          <Btn onClick={saveForm} style={{ ...S.saveBtn, background: ok ? GOLD : "#1e2128", color: ok ? "#000" : "#555", opacity: ok ? 1 : 0.5 }}>
-            {editTarget ? "💾 Enregistrer" : "➕ Ajouter"}
+          <Btn onClick={saveForm} style={{...S.greenBtn,width:"100%",marginTop:24,opacity:ok?1:.4}}>
+            {editTarget?"💾 Enregistrer":"➕ Ajouter"}
           </Btn>
         </div>
       </div>
@@ -951,139 +560,208 @@ export default function App() {
   }
 
   // ════════════════════════════════════════════════════════════════════════════
-  // LIBRARY VIEW
+  // PLAYLIST DETAIL
   // ════════════════════════════════════════════════════════════════════════════
-  const displaySongs = activePlaylist
-    ? songs.filter(s => activePlaylist.songIds.includes(s.id))
-    : songs;
-  const finalSongs = displaySongs.filter(s =>
-    s.title.toLowerCase().includes(search.toLowerCase()) ||
-    (s.artist || "").toLowerCase().includes(search.toLowerCase())
+  if (view === "playlist_detail" && activePlaylist) {
+    return (
+      <div style={S.page}>
+        <style>{CSS}</style>
+        <div style={S.subHeader}>
+          <Btn onClick={()=>{setView("lib");setActivePlaylist(null);}} style={S.backBtn}>←</Btn>
+          <span style={S.subTitle}>{activePlaylist.name}</span>
+        </div>
+        <div style={S.scrollBody}>
+          {playlistSongs.length===0&&<div style={S.empty}><div style={{fontSize:40,marginBottom:8}}>🎵</div><div style={{color:"#535353"}}>Playlist vide</div></div>}
+          {playlistSongs.map(song=>(
+            <TrackRow key={song.id} song={song} onPlay={()=>startSing(song)} onEdit={()=>openEdit(song)}
+              onRemove={()=>setPlaylists(p=>p.map(pl=>pl.id===activePlaylist.id?{...pl,songIds:pl.songIds.filter(id=>id!==song.id)}:pl))}
+            />
+          ))}
+          <div style={{height:100}}/>
+        </div>
+      </div>
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // MAIN TABS
+  // ════════════════════════════════════════════════════════════════════════════
+
+  // ── HOME ──
+  const homeContent = (
+    <div style={S.scrollBody}>
+      <div style={{paddingTop:8}}>
+        <div style={S.sectionTitle}>Accès rapide</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:24}}>
+          {songs.slice(0,8).map(song=>(
+            <Btn key={song.id} onClick={()=>startSing(song)} style={S.quickCard}>
+              {song.thumbnail?<img src={song.thumbnail} alt="" style={{width:48,height:48,objectFit:"cover",borderRadius:4,flexShrink:0}}/>
+                :<div style={{width:48,height:48,background:"#282828",borderRadius:4,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>🎵</div>}
+              <span style={{fontSize:13,fontWeight:700,color:"#fff",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{song.title}</span>
+            </Btn>
+          ))}
+        </div>
+        {playlists.length>0&&<>
+          <div style={S.sectionTitle}>Mes playlists</div>
+          {playlists.slice(0,4).map(pl=>(
+            <Btn key={pl.id} onClick={()=>{setActivePlaylist(pl);setView("playlist_detail");}} style={S.playlistRow}>
+              <div style={{width:56,height:56,background:"#282828",borderRadius:4,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>🎵</div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{color:"#fff",fontWeight:700,fontSize:15}}>{pl.name}</div>
+                <div style={{color:"#727272",fontSize:13}}>{pl.fromSpotify?"Playlist • Spotify":"Playlist"} • {pl.songIds.length} titres</div>
+              </div>
+            </Btn>
+          ))}
+        </>}
+      </div>
+      <div style={{height:100}}/>
+    </div>
   );
+
+  // ── SEARCH ──
+  const searchContent = (
+    <div style={S.scrollBody}>
+      <div style={{...S.searchWrap,margin:"0 0 16px"}}>
+        <span style={{color:"#727272",fontSize:16,marginRight:8}}>🔍</span>
+        <input value={globalSearch} onChange={e=>setGlobalSearch(e.target.value)} placeholder="Artistes, chansons..." style={S.searchInput} autoFocus/>
+        {globalSearch&&<Btn onClick={()=>setGlobalSearch("")} style={{background:"transparent",color:"#727272",fontSize:18,padding:"0 8px"}}>✕</Btn>}
+      </div>
+      {globalSearch ? (
+        allFiltered.length===0
+          ? <div style={S.empty}><div style={{color:"#535353"}}>Aucun résultat pour "{globalSearch}"</div></div>
+          : allFiltered.map(song=><TrackRow key={song.id} song={song} onPlay={()=>startSing(song)} onEdit={()=>openEdit(song)} onAdd={playlists.length>0?()=>setAddToPlaylistSong(song):null}/>)
+      ) : (
+        <div style={{color:"#727272",textAlign:"center",padding:"40px 20px",fontSize:15}}>Cherche une chanson ou un artiste</div>
+      )}
+      <div style={{height:100}}/>
+    </div>
+  );
+
+  // ── LIBRARY ──
+  const libraryContent = (
+    <div style={S.scrollBody}>
+      {/* Playlists */}
+      <div style={{display:"flex",gap:8,marginBottom:16,overflowX:"auto",paddingBottom:4}}>
+        {["Tout","Playlists"].map(f=>(
+          <div key={f} style={{background:"#282828",color:"#fff",borderRadius:20,padding:"6px 14px",fontSize:13,fontWeight:600,flexShrink:0,cursor:"pointer"}}>{f}</div>
+        ))}
+      </div>
+      {playlists.map(pl=>(
+        <Btn key={pl.id} onClick={()=>{setActivePlaylist(pl);setView("playlist_detail");}} style={S.playlistRow}>
+          <div style={{width:56,height:56,background:"#333",borderRadius:4,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>🎵</div>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{color:"#fff",fontWeight:700,fontSize:15,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{pl.name}</div>
+            <div style={{color:"#727272",fontSize:13}}>{pl.fromSpotify?"Playlist · Spotify":"Playlist"} · {pl.songIds.length} titres</div>
+          </div>
+        </Btn>
+      ))}
+      {songs.filter(s=>!playlists.some(pl=>pl.songIds.includes(s.id))).map(song=>(
+        <TrackRow key={song.id} song={song} onPlay={()=>startSing(song)} onEdit={()=>openEdit(song)} onAdd={playlists.length>0?()=>setAddToPlaylistSong(song):null}
+          onDelete={()=>setDelId(song.id)}/>
+      ))}
+      <div style={{height:100}}/>
+    </div>
+  );
+
+  // ── IMPORT ──
+  const importContent = (
+    <div style={S.scrollBody}>
+      <div style={S.searchCard}>
+        <div style={S.cardLabel}>📁 IMPORTER DEPUIS SPOTIFY</div>
+        <div style={{color:"#b3b3b3",fontSize:13,lineHeight:1.7,marginBottom:16}}>
+          <div style={{marginBottom:4}}>1️⃣ Va sur <span style={{color:"#1DB954"}}>exportify.net</span></div>
+          <div style={{marginBottom:4}}>2️⃣ Connecte-toi et exporte une playlist en CSV</div>
+          <div>3️⃣ Reviens ici et importe le fichier</div>
+        </div>
+        <label style={{...S.greenBtn,display:"block",textAlign:"center",cursor:"pointer"}}>
+          📁 Choisir un fichier CSV
+          <input type="file" accept=".csv" style={{display:"none"}} onChange={e=>handleCSV(e.target.files&&e.target.files[0])}/>
+        </label>
+      </div>
+      {importProgress.active&&(
+        <div style={{...S.searchCard,marginTop:16}}>
+          <div style={{color:"#fff",fontSize:14,marginBottom:10}}>Import en cours... {importProgress.done}/{importProgress.total}</div>
+          <div style={{height:4,background:"#282828",borderRadius:4,overflow:"hidden"}}>
+            <div style={{height:"100%",width:`${importProgress.total>0?Math.round(importProgress.done/importProgress.total*100):0}%`,background:"#1DB954",borderRadius:4,transition:"width .3s ease"}}/>
+          </div>
+        </div>
+      )}
+      <div style={{...S.searchCard,marginTop:16}}>
+        <div style={S.cardLabel}>➕ NOUVELLE CHANSON MANUELLE</div>
+        <Btn onClick={()=>openEdit()} style={{...S.greenBtn,width:"100%"}}>Ajouter une chanson</Btn>
+      </div>
+      <div style={{...S.searchCard,marginTop:16}}>
+        <div style={S.cardLabel}>📋 CRÉER UNE PLAYLIST</div>
+        <input value={newPlaylistName} onChange={e=>setNewPlaylistName(e.target.value)} placeholder="Nom de la playlist" style={{...S.spotInput,marginBottom:10}}/>
+        <Btn onClick={()=>createPlaylist(newPlaylistName)} style={{...S.greenBtn,width:"100%"}}>Créer</Btn>
+      </div>
+      <div style={{height:100}}/>
+    </div>
+  );
+
+  const tabContent = tab==="home"?homeContent:tab==="search"?searchContent:tab==="library"?libraryContent:importContent;
+  const tabTitle   = tab==="home"?"Accueil":tab==="search"?"Rechercher":tab==="library"?"Bibliothèque":"Importer";
 
   return (
     <div style={S.page}>
-      <style>{globalCSS}</style>
+      <style>{CSS}</style>
 
       {/* Header */}
-      <div style={S.libHeader}>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          {activePlaylist ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <Btn onClick={() => setActivePlaylist(null)} style={{ background: "none", color: MUTED, fontSize: 18, padding: "0 4px 0 0" }}>←</Btn>
-              <div>
-                <div style={S.appLabel}>PLAYLIST</div>
-                <div style={{ ...S.appTitle, fontSize: 20 }}>{activePlaylist.name}</div>
-              </div>
-            </div>
-          ) : (
-            <>
-              <div style={S.appLabel}>🎤 LYRICS</div>
-              <div style={S.appTitle}>Ma bibliothèque</div>
-            </>
-          )}
+      <div style={S.header}>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <div style={{width:36,height:36,borderRadius:18,background:"#535353",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>🎤</div>
+          <span style={{fontSize:22,fontWeight:700,color:"#fff"}}>{tabTitle}</span>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          {!activePlaylist && <Btn onClick={() => setView("spotify")} style={{ ...S.addBtn, background: "#1DB954" }}>🎵</Btn>}
-          {!activePlaylist && <Btn onClick={() => setShowPlaylistModal(true)} style={{ ...S.addBtn, background: "#1c2030", color: TEXT }}>≡</Btn>}
-          <Btn onClick={() => openEdit()} style={S.addBtn}>+</Btn>
+        <div style={{display:"flex",gap:16}}>
+          {tab==="library"&&<Btn onClick={()=>setTab("import")} style={{background:"transparent",color:"#fff",fontSize:22,padding:0}}>+</Btn>}
+          {tab==="home"&&<Btn onClick={()=>setTab("search")} style={{background:"transparent",color:"#fff",fontSize:20,padding:0}}>🔍</Btn>}
         </div>
       </div>
 
-      {/* Playlists strip */}
-      {!activePlaylist && playlists.length > 0 && (
-        <div style={{ display: "flex", gap: 8, padding: "10px 16px 0", overflowX: "auto", flexShrink: 0, WebkitOverflowScrolling: "touch" }}>
-          {playlists.map(pl => (
-            <div key={pl.id} style={{ display: "flex", alignItems: "center", gap: 6, background: CARD, border: `1px solid ${BORDER}`, borderRadius: 20, padding: "6px 12px", flexShrink: 0, cursor: "pointer" }}
-              onClick={() => setActivePlaylist(pl)}>
-              <span style={{ fontSize: 12, color: TEXT, whiteSpace: "nowrap" }}>{pl.fromSpotify ? "🎵 " : "📋 "}{pl.name}</span>
-              <span style={{ fontSize: 11, color: MUTED }}>{pl.songIds.length}</span>
-            </div>
-          ))}
-        </div>
-      )}
+      {/* Content */}
+      {tabContent}
 
-      {/* Search */}
-      <div style={{ ...S.searchWrap, margin: "12px 16px 0" }}>
-        <span style={{ padding: "0 10px 0 14px", color: MUTED, fontSize: 15 }}>🔍</span>
-        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Rechercher..." style={S.searchInput} />
-        {search && <Btn onClick={() => setSearch("")} style={S.clearBtn}>✕</Btn>}
-      </div>
-
-      {/* Songs list */}
-      <div style={S.list}>
-        {finalSongs.length === 0 && (
-          <div style={S.empty}>
-            <div style={{ fontSize: 44, marginBottom: 12 }}>🎵</div>
-            <div style={{ color: MUTED, fontSize: 15, whiteSpace: "pre-line" }}>
-              {search ? "Aucun résultat" : activePlaylist ? "Playlist vide" : "Aucune chanson.\nAppuie sur + pour commencer."}
-            </div>
-          </div>
-        )}
-        {finalSongs.map(song => (
-          <SongRow key={song.id} song={song}
-            onSing={() => startSing(song)}
-            onEdit={() => openEdit(song)}
-            onDelete={() => setDelId(song.id)}
-            onAddToPlaylist={playlists.length > 0 ? () => setAddToPlaylistSong(song) : null}
-            inPlaylist={activePlaylist}
-            onRemoveFromPlaylist={activePlaylist ? () => removeSongFromPlaylist(activePlaylist.id, song.id) : null}
-          />
+      {/* Bottom nav */}
+      <div style={S.bottomNav}>
+        {[
+          {id:"home",icon:"🏠",label:"Accueil"},
+          {id:"search",icon:"🔍",label:"Rechercher"},
+          {id:"library",icon:"📚",label:"Bibliothèque"},
+          {id:"import",icon:"➕",label:"Importer"},
+        ].map(t=>(
+          <Btn key={t.id} onClick={()=>{setTab(t.id);if(t.id!=="search")setGlobalSearch("");}} style={{background:"transparent",display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"4px 0",flex:1}}>
+            <span style={{fontSize:20,opacity:tab===t.id?1:.4}}>{t.icon}</span>
+            <span style={{fontSize:10,color:tab===t.id?"#fff":"#535353",fontWeight:tab===t.id?700:400}}>{t.label}</span>
+          </Btn>
         ))}
-        <div style={{ height: 40 }} />
       </div>
 
       {/* Delete confirm */}
-      {delId && (
-        <div style={S.overlay} onClick={() => setDelId(null)}>
-          <div style={S.sheet} onClick={e => e.stopPropagation()}>
-            <div style={{ fontSize: 28, marginBottom: 8 }}>🗑️</div>
-            <div style={S.sheetTitle}>Supprimer cette chanson ?</div>
-            <div style={S.sheetSub}>Cette action est irréversible.</div>
-            <Btn onClick={() => { vibrate(20); setSongs(s => s.filter(x => x.id !== delId)); setDelId(null); }} style={S.delConfirm}>Supprimer</Btn>
-            <Btn onClick={() => setDelId(null)} style={S.delCancel}>Annuler</Btn>
+      {delId&&(
+        <div style={S.overlay} onClick={()=>setDelId(null)}>
+          <div style={S.sheet} onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:28,marginBottom:8}}>🗑️</div>
+            <div style={{fontWeight:700,fontSize:18,color:"#fff",marginBottom:6}}>Supprimer cette chanson ?</div>
+            <div style={{color:"#727272",fontSize:14,marginBottom:24}}>Cette action est irréversible.</div>
+            <Btn onClick={()=>{vibrate(20);setSongs(s=>s.filter(x=>x.id!==delId));setDelId(null);}} style={{...S.greenBtn,width:"100%",background:"#e91429",marginBottom:10}}>Supprimer</Btn>
+            <Btn onClick={()=>setDelId(null)} style={{...S.greenBtn,width:"100%",background:"#282828",color:"#fff"}}>Annuler</Btn>
           </div>
         </div>
       )}
 
-      {/* New playlist modal */}
-      {showPlaylistModal && (
-        <div style={S.overlay} onClick={() => setShowPlaylistModal(false)}>
-          <div style={S.sheet} onClick={e => e.stopPropagation()}>
-            <div style={{ fontSize: 28, marginBottom: 8 }}>📋</div>
-            <div style={S.sheetTitle}>Nouvelle playlist</div>
-            <input value={newPlaylistName} onChange={e => setNewPlaylistName(e.target.value)}
-              placeholder="Nom de la playlist" style={{ ...S.input, margin: "16px 0", textAlign: "center" }} />
-            {playlists.length > 0 && (
-              <div style={{ marginBottom: 16 }}>
-                <div style={{ color: MUTED, fontSize: 12, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.1em" }}>Mes playlists</div>
-                {playlists.map(pl => (
-                  <div key={pl.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0", borderBottom: `1px solid ${BORDER}` }}>
-                    <span style={{ color: TEXT, fontSize: 14 }}>{pl.fromSpotify ? "🎵 " : "📋 "}{pl.name} <span style={{ color: MUTED }}>({pl.songIds.length})</span></span>
-                    <Btn onClick={() => deletePlaylist(pl.id)} style={{ background: "none", color: "#e07070", fontSize: 18 }}>🗑</Btn>
-                  </div>
-                ))}
-              </div>
-            )}
-            <Btn onClick={() => createPlaylist(newPlaylistName)} style={{ ...S.delConfirm, background: GOLD, color: "#000" }}>Créer</Btn>
-            <Btn onClick={() => setShowPlaylistModal(false)} style={S.delCancel}>Annuler</Btn>
-          </div>
-        </div>
-      )}
-
-      {/* Add to playlist modal */}
-      {addToPlaylistSong && (
-        <div style={S.overlay} onClick={() => setAddToPlaylistSong(null)}>
-          <div style={S.sheet} onClick={e => e.stopPropagation()}>
-            <div style={S.sheetTitle}>Ajouter à une playlist</div>
-            <div style={{ color: MUTED, fontSize: 13, marginBottom: 16 }}>{addToPlaylistSong.title}</div>
-            {playlists.map(pl => (
-              <Btn key={pl.id} onClick={() => addSongToPlaylist(pl.id, addToPlaylistSong.id)}
-                style={{ display: "block", width: "100%", background: CARD, color: TEXT, borderRadius: 12, padding: "13px", fontSize: 15, marginBottom: 8, textAlign: "left" }}>
-                {pl.fromSpotify ? "🎵 " : "📋 "}{pl.name} <span style={{ color: MUTED, fontSize: 12 }}>({pl.songIds.length} titres)</span>
+      {/* Add to playlist */}
+      {addToPlaylistSong&&(
+        <div style={S.overlay} onClick={()=>setAddToPlaylistSong(null)}>
+          <div style={S.sheet} onClick={e=>e.stopPropagation()}>
+            <div style={{fontWeight:700,fontSize:18,color:"#fff",marginBottom:4}}>Ajouter à une playlist</div>
+            <div style={{color:"#727272",fontSize:13,marginBottom:16}}>{addToPlaylistSong.title}</div>
+            {playlists.map(pl=>(
+              <Btn key={pl.id} onClick={()=>addSongToPlaylist(pl.id,addToPlaylistSong.id)}
+                style={{display:"block",width:"100%",background:"#282828",color:"#fff",borderRadius:8,padding:"13px",fontSize:15,marginBottom:8,textAlign:"left"}}>
+                🎵 {pl.name} <span style={{color:"#727272",fontSize:12}}>({pl.songIds.length})</span>
               </Btn>
             ))}
-            <Btn onClick={() => setAddToPlaylistSong(null)} style={S.delCancel}>Annuler</Btn>
+            <Btn onClick={()=>setAddToPlaylistSong(null)} style={{...S.greenBtn,width:"100%",background:"#282828",color:"#fff",marginTop:4}}>Annuler</Btn>
           </div>
         </div>
       )}
@@ -1091,112 +769,110 @@ export default function App() {
   );
 }
 
-// ─── Song Row ─────────────────────────────────────────────────────────────────
-function SongRow({ song, onSing, onEdit, onDelete, onAddToPlaylist, inPlaylist, onRemoveFromPlaylist }) {
+// ─── Track Row ────────────────────────────────────────────────────────────────
+function TrackRow({ song, onPlay, onEdit, onAdd, onRemove, onDelete }) {
   const [dx, setDx] = useState(0);
   const startX = useRef(null);
-  function ts(e) { startX.current = e.touches[0].clientX; }
+  function ts(e) { startX.current=e.touches[0].clientX; }
   function tm(e) {
-    if (startX.current == null) return;
-    const d = e.touches[0].clientX - startX.current;
-    setDx(d < 0 ? Math.max(d, -80) : Math.min(d, 0));
+    if (startX.current==null) return;
+    const d=e.touches[0].clientX-startX.current;
+    setDx(d<0?Math.max(d,-72):Math.min(d,0));
   }
-  function te() { setDx(dx < -50 ? -80 : 0); startX.current = null; }
+  function te() { setDx(dx<-36?-72:0); startX.current=null; }
+
   return (
-    <div style={{ position: "relative", marginBottom: 10, borderRadius: 14, overflow: "hidden" }}>
-      <div style={S.rowDelete}>
-        <Btn onClick={inPlaylist ? onRemoveFromPlaylist : onDelete} style={{ background: "transparent", color: "#fff", fontSize: 20, padding: "8px" }}>
-          {inPlaylist ? "✕" : "🗑️"}
-        </Btn>
+    <div style={{position:"relative",marginBottom:2,overflow:"hidden"}}>
+      <div style={{position:"absolute",right:0,top:0,bottom:0,background:onRemove?"#e91429":"#e91429",display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:20,minWidth:72,borderRadius:4}}>
+        <Btn onClick={onRemove||onDelete} style={{background:"transparent",color:"#fff",fontSize:20,padding:"8px"}}>🗑</Btn>
       </div>
-      <div style={{ ...S.row, transform: `translateX(${dx}px)`, transition: (dx === 0 || dx === -80) ? "transform .22s ease" : "none" }}
+      <div style={{...S.trackRow,transform:`translateX(${dx}px)`,transition:(dx===0||dx===-72)?"transform .2s ease":"none"}}
         onTouchStart={ts} onTouchMove={tm} onTouchEnd={te}>
-        {song.thumbnail && <img src={song.thumbnail} alt="" style={{ width: 40, height: 40, borderRadius: 6, objectFit: "cover", flexShrink: 0 }} />}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={S.rowTitle}>{song.title}</div>
-          <div style={S.rowSub}>
-            {song.artist || <em style={{ opacity: .5 }}>Artiste inconnu</em>}
-            {song.syncedLines && <span style={{ color: GOLD, marginLeft: 6, fontSize: 10 }}>● KARAOKÉ</span>}
-            {song.videoId && <span style={{ color: "#6a8fff", marginLeft: 6, fontSize: 10 }}>▶ YT</span>}
+        {song.thumbnail
+          ?<img src={song.thumbnail} alt="" style={{width:44,height:44,objectFit:"cover",borderRadius:4,flexShrink:0}}/>
+          :<div style={{width:44,height:44,background:"#282828",borderRadius:4,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>🎵</div>
+        }
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{color:"#fff",fontSize:15,fontWeight:500,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{song.title}</div>
+          <div style={{color:"#727272",fontSize:13,marginTop:2,display:"flex",alignItems:"center",gap:6}}>
+            {song.artist||<em style={{opacity:.5}}>Artiste inconnu</em>}
+            {song.syncedLines&&<span style={{color:"#1DB954",fontSize:10}}>● SYNC</span>}
           </div>
         </div>
-        {onAddToPlaylist && <Btn onClick={onAddToPlaylist} style={{ ...S.editBtn, fontSize: 13 }}>＋📋</Btn>}
-        <Btn onClick={onEdit} style={S.editBtn}>✏️</Btn>
-        <Btn onClick={onSing} style={S.singBtn}>{song.syncedLines ? "🎤" : "▶"}</Btn>
+        <div style={{display:"flex",gap:4,flexShrink:0}}>
+          {onAdd&&<Btn onClick={onAdd} style={{...S.iconSmall}}>➕</Btn>}
+          {onEdit&&<Btn onClick={onEdit} style={{...S.iconSmall}}>✏️</Btn>}
+          <Btn onClick={onPlay} style={{background:"transparent",color:"#727272",fontSize:20,padding:"8px",border:"none",cursor:"pointer"}}>▶</Btn>
+        </div>
       </div>
     </div>
   );
 }
 
 function Btn({ onClick, style, children }) {
-  return <button onClick={onClick} style={{ border: "none", cursor: "pointer", fontFamily: "inherit", WebkitTapHighlightColor: "transparent", ...style }}>{children}</button>;
+  return <button onClick={onClick} style={{border:"none",cursor:"pointer",fontFamily:"inherit",WebkitTapHighlightColor:"transparent",...style}}>{children}</button>;
 }
+function emptyForm() { return {title:"",artist:"",lyrics:"",syncedLines:null,fontSize:24,videoId:null,videoTitle:null,thumbnail:null}; }
+// ─── Spotify styles ───────────────────────────────────────────────────────────
+const SP = {
+  bg:      "#121212",
+  card:    "#181818",
+  card2:   "#282828",
+  green:   "#1DB954",
+  white:   "#FFFFFF",
+  gray1:   "#B3B3B3",
+  gray2:   "#727272",
+  gray3:   "#535353",
+  gray4:   "#282828",
+  red:     "#E91429",
+};
 
-function emptyForm() {
-  return { title: "", artist: "", lyrics: "", syncedLines: null, fontSize: 24, videoId: null, videoTitle: null, thumbnail: null };
-}
-
-const GOLD   = "#e8c97a";
-const BG     = "#0d0f14";
-const CARD   = "#13161d";
-const BORDER = "rgba(255,255,255,0.07)";
-const TEXT   = "#e0d8c8";
-const MUTED  = "#555";
-
-const globalCSS = `
+const CSS = `
   *, *::before, *::after { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  html, body { overflow: hidden; position: fixed; width: 100%; height: 100%; overscroll-behavior: none; }
-  input, textarea { -webkit-appearance: none; appearance: none; border-radius: 12px; border: 1px solid rgba(255,255,255,0.07) !important; outline: none !important; background: #13161d; color: #e0d8c8; box-shadow: none !important; -webkit-box-shadow: none !important; }
-  input:focus, textarea:focus { border: 1px solid rgba(232,201,122,0.4) !important; outline: none !important; box-shadow: none !important; }
+  html, body { overflow: hidden; position: fixed; width: 100%; height: 100%; overscroll-behavior: none; margin: 0; background: ${SP.bg}; }
+  input, textarea { -webkit-appearance: none; appearance: none; border-radius: 4px; border: none !important; outline: none !important; background: ${SP.card2}; color: #fff; box-shadow: none !important; }
+  input:focus, textarea:focus { border: none !important; outline: none !important; }
+  input::placeholder, textarea::placeholder { color: ${SP.gray3}; }
   @keyframes pulse { 0%,100%{opacity:.2} 50%{opacity:.8} }
+  ::-webkit-scrollbar { display: none; }
 `;
 
 const S = {
-  page:        { height: "100dvh", background: BG, color: TEXT, fontFamily: "'Georgia',serif", display: "flex", flexDirection: "column", overflow: "hidden" },
-  libHeader:   { display: "flex", alignItems: "flex-end", justifyContent: "space-between", padding: "0 16px 14px", paddingTop: "max(20px,env(safe-area-inset-top))", borderBottom: `1px solid ${BORDER}`, flexShrink: 0 },
-  appLabel:    { fontSize: 10, letterSpacing: "0.22em", color: GOLD, textTransform: "uppercase", marginBottom: 3 },
-  appTitle:    { fontSize: 26, fontWeight: 700, color: "#f0e8d0", lineHeight: 1 },
-  addBtn:      { background: GOLD, color: "#000", borderRadius: 22, padding: "10px 18px", fontSize: 15, fontWeight: 700 },
-  searchWrap:  { display: "flex", alignItems: "center", background: CARD, borderRadius: 12, border: `1px solid ${BORDER}`, overflow: "hidden", flexShrink: 0 },
-  searchInput: { flex: 1, background: "transparent", border: "none", outline: "none", color: TEXT, fontSize: 15, padding: "13px 0", fontFamily: "inherit" },
-  clearBtn:    { background: "transparent", color: MUTED, padding: "10px 14px", fontSize: 18 },
-  list:        { flex: 1, overflowY: "auto", padding: "12px 16px 0", WebkitOverflowScrolling: "touch" },
-  empty:       { textAlign: "center", padding: "60px 20px" },
-  row:         { background: CARD, border: `1px solid ${BORDER}`, borderRadius: 14, padding: "13px 12px", display: "flex", alignItems: "center", gap: 8, position: "relative", zIndex: 1, willChange: "transform", userSelect: "none" },
-  rowTitle:    { fontSize: 15, fontWeight: 600, color: "#f0e8d0", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
-  rowSub:      { fontSize: 12, color: "#666", marginTop: 2 },
-  rowDelete:   { position: "absolute", right: 0, top: 0, bottom: 0, background: "#c0504d", borderRadius: 14, display: "flex", alignItems: "center", justifyContent: "flex-end", paddingRight: 16, minWidth: 80 },
-  editBtn:     { background: "#1c2030", color: MUTED, borderRadius: 10, padding: "8px 10px", fontSize: 15, flexShrink: 0 },
-  singBtn:     { background: GOLD, color: "#000", borderRadius: 22, padding: "9px 14px", fontSize: 16, fontWeight: 700, flexShrink: 0 },
-  overlay:     { position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "flex-end", zIndex: 200 },
-  sheet:       { background: "#181b24", borderRadius: "20px 20px 0 0", padding: "28px 20px", paddingBottom: "max(28px,env(safe-area-inset-bottom))", width: "100%", textAlign: "center", maxHeight: "80dvh", overflowY: "auto" },
-  sheetTitle:  { fontWeight: 700, fontSize: 18, color: "#f0e8d0", marginBottom: 6 },
-  sheetSub:    { color: MUTED, fontSize: 14, marginBottom: 24 },
-  delConfirm:  { display: "block", width: "100%", background: "#c0504d", color: "#fff", borderRadius: 14, padding: "15px", fontSize: 16, fontWeight: 700, marginBottom: 10 },
-  delCancel:   { display: "block", width: "100%", background: "#1c2030", color: TEXT, borderRadius: 14, padding: "15px", fontSize: 16 },
-  editHeader:  { display: "flex", alignItems: "center", gap: 12, padding: "0 16px 14px", paddingTop: "max(16px,env(safe-area-inset-top))", borderBottom: `1px solid ${BORDER}`, flexShrink: 0 },
-  backBtn:     { background: "#1c2030", color: MUTED, borderRadius: 10, padding: "9px 14px", fontSize: 14 },
-  pageTitle:   { fontSize: 18, fontWeight: 700, color: "#f0e8d0" },
-  editBody:    { flex: 1, overflowY: "auto", padding: "12px 16px", paddingBottom: "max(24px,env(safe-area-inset-bottom))", WebkitOverflowScrolling: "touch" },
-  searchBox:   { background: "#0e1520", border: `1px solid ${GOLD}44`, borderRadius: 14, padding: "14px", marginBottom: 4 },
-  searchBoxLabel: { fontSize: 11, letterSpacing: "0.15em", color: GOLD, textTransform: "uppercase", marginBottom: 10 },
-  searchBtn:   { borderRadius: 12, padding: "13px", fontSize: 15, fontWeight: 700, width: "100%", marginTop: 10 },
-  divider:     { textAlign: "center", color: "#2a2d38", fontSize: 12, margin: "14px 0 2px" },
-  label:       { display: "block", fontSize: 11, letterSpacing: "0.12em", textTransform: "uppercase", color: MUTED, marginBottom: 6, marginTop: 16 },
-  input:       { width: "100%", background: CARD, border: `1px solid ${BORDER}`, borderRadius: 12, padding: "13px 14px", color: TEXT, fontSize: 15, fontFamily: "inherit", outline: "none", display: "block" },
-  pasteBtn:    { position: "absolute", top: 10, right: 10, background: GOLD, color: "#000", borderRadius: 10, padding: "6px 10px", fontSize: 12, fontWeight: 700 },
-  syncBadge:   { background: "#0a1a0a", border: "1px solid #2a4a2a", borderRadius: 10, padding: "10px 14px", marginTop: 8, fontSize: 13, color: "#7ec87e" },
-  sliderRow:   { display: "flex", alignItems: "center", gap: 10, margin: "6px 0 4px" },
-  saveBtn:     { display: "block", width: "100%", borderRadius: 14, padding: "16px", fontSize: 16, fontWeight: 700, marginTop: 24, marginBottom: 8 },
-  singWrap:    { position: "fixed", inset: 0, background: "#07090e", display: "flex", flexDirection: "column", fontFamily: "'Georgia',serif", userSelect: "none" },
-  singBar:     { display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", paddingTop: "max(10px,env(safe-area-inset-top))", background: "rgba(8,10,16,0.95)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", borderBottom: `1px solid ${BORDER}`, flexShrink: 0, zIndex: 10, minHeight: 58 },
-  ytWrap:      { flexShrink: 0, background: "#000", position: "relative" },
-  timerBar:    { display: "flex", alignItems: "center", justifyContent: "center", padding: "4px 16px", flexShrink: 0, minHeight: 26 },
-  iconBtn:     { background: "#1c2030", color: "#aaa", borderRadius: 10, padding: "9px 12px", fontSize: 13, flexShrink: 0, whiteSpace: "nowrap" },
-  playBtn:     { borderRadius: 24, width: 48, height: 48, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
-  singTitle:   { fontSize: 13, fontWeight: 700, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
-  singArtist:  { fontSize: 11, color: "#555", marginTop: 1 },
-  lyricsScroll:{ flex: 1, overflowY: "auto", position: "relative", WebkitOverflowScrolling: "touch" },
-  fadeTop:     { position: "sticky", top: 0, height: 70, background: "linear-gradient(to bottom,#07090e 30%,transparent)", zIndex: 2, pointerEvents: "none", marginBottom: -70 },
-  fadeBot:     { position: "sticky", bottom: 0, height: 120, background: "linear-gradient(to top,#07090e 40%,transparent)", zIndex: 2, pointerEvents: "none", marginTop: -120 },
+  page:       { height:"100dvh", background:SP.bg, color:SP.white, fontFamily:"'Circular Std','Helvetica Neue',Helvetica,Arial,sans-serif", display:"flex", flexDirection:"column", overflow:"hidden" },
+  header:     { display:"flex", alignItems:"center", justifyContent:"space-between", padding:"0 16px 12px", paddingTop:"max(16px,env(safe-area-inset-top))", flexShrink:0 },
+  subHeader:  { display:"flex", alignItems:"center", gap:12, padding:"0 16px 14px", paddingTop:"max(16px,env(safe-area-inset-top))", flexShrink:0 },
+  backBtn:    { background:"transparent", color:SP.white, fontSize:22, padding:"8px 0" },
+  subTitle:   { fontSize:18, fontWeight:700, color:SP.white },
+  scrollBody: { flex:1, overflowY:"auto", padding:"0 16px", WebkitOverflowScrolling:"touch" },
+  searchWrap: { display:"flex", alignItems:"center", background:SP.card2, borderRadius:4, padding:"0 12px", flexShrink:0 },
+  searchInput:{ flex:1, background:"transparent", border:"none", outline:"none", color:SP.white, fontSize:15, padding:"12px 0", fontFamily:"inherit" },
+  sectionTitle:{ fontSize:22, fontWeight:700, color:SP.white, marginBottom:14, marginTop:8 },
+  quickCard:  { display:"flex", alignItems:"center", gap:10, background:SP.card2, borderRadius:4, padding:"8px 10px", overflow:"hidden", cursor:"pointer", textAlign:"left" },
+  playlistRow:{ display:"flex", alignItems:"center", gap:14, padding:"8px 0", cursor:"pointer", width:"100%", background:"transparent", textAlign:"left" },
+  trackRow:   { display:"flex", alignItems:"center", gap:12, padding:"8px 0", background:SP.bg, position:"relative", zIndex:1, willChange:"transform", userSelect:"none" },
+  iconSmall:  { background:"transparent", color:SP.gray3, fontSize:16, padding:"8px 6px", border:"none", cursor:"pointer" },
+  empty:      { textAlign:"center", padding:"60px 20px", color:SP.gray3, fontSize:15 },
+  searchCard: { background:SP.card, borderRadius:8, padding:16, marginBottom:4 },
+  cardLabel:  { fontSize:11, letterSpacing:"0.15em", color:SP.gray2, marginBottom:12 },
+  spotLabel:  { display:"block", fontSize:11, letterSpacing:"0.12em", color:SP.gray2, marginBottom:6, marginTop:16 },
+  spotInput:  { width:"100%", background:SP.card2, borderRadius:4, padding:"12px 14px", color:SP.white, fontSize:15, fontFamily:"inherit", display:"block" },
+  greenBtn:   { background:SP.green, color:"#000", borderRadius:24, padding:"13px 20px", fontSize:15, fontWeight:700, cursor:"pointer", fontFamily:"inherit", border:"none" },
+  pasteBtn:   { position:"absolute", top:10, right:10, background:SP.green, color:"#000", borderRadius:4, padding:"6px 10px", fontSize:12, fontWeight:700, border:"none", cursor:"pointer" },
+  syncBadge:  { background:"#0a2e1a", border:"1px solid #1a4a2a", borderRadius:4, padding:"10px 14px", marginTop:8, fontSize:13, color:"#1DB954" },
+  divider:    { textAlign:"center", color:SP.gray4, fontSize:12, margin:"16px 0 4px" },
+  overlay:    { position:"fixed", inset:0, background:"rgba(0,0,0,0.7)", display:"flex", alignItems:"flex-end", zIndex:200 },
+  sheet:      { background:"#282828", borderRadius:"12px 12px 0 0", padding:"28px 20px", paddingBottom:"max(28px,env(safe-area-inset-bottom))", width:"100%", textAlign:"center", maxHeight:"80dvh", overflowY:"auto" },
+  bottomNav:  { display:"flex", alignItems:"flex-end", padding:"8px 0", paddingBottom:"max(8px,env(safe-area-inset-bottom))", background:SP.bg, borderTop:"1px solid #282828", flexShrink:0 },
+  singWrap:   { position:"fixed", inset:0, background:SP.bg, display:"flex", flexDirection:"column", fontFamily:"'Circular Std','Helvetica Neue',sans-serif", userSelect:"none" },
+  singBar:    { display:"flex", alignItems:"center", gap:8, padding:"8px 12px", paddingTop:"max(10px,env(safe-area-inset-top))", background:"rgba(18,18,18,0.95)", backdropFilter:"blur(20px)", WebkitBackdropFilter:"blur(20px)", borderBottom:"1px solid #282828", flexShrink:0, zIndex:10, minHeight:58 },
+  singBack:   { background:"transparent", color:SP.gray2, fontSize:18, padding:"8px", border:"none", cursor:"pointer" },
+  singTitle:  { fontSize:13, fontWeight:700, color:SP.white, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" },
+  singArtist: { fontSize:11, color:SP.gray3, marginTop:1 },
+  singIcon:   { background:SP.card2, color:SP.gray2, borderRadius:8, padding:"8px 10px", fontSize:13, flexShrink:0, whiteSpace:"nowrap", border:"none", cursor:"pointer" },
+  singPlay:   { borderRadius:24, width:46, height:46, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0, border:"none", cursor:"pointer" },
+  ytWrap:     { flexShrink:0, background:"#000", overflow:"hidden", transition:"height .3s ease" },
+  timerRow:   { display:"flex", alignItems:"center", justifyContent:"center", padding:"4px 16px", flexShrink:0, minHeight:24 },
+  lyricsScroll:{ flex:1, overflowY:"auto", position:"relative", WebkitOverflowScrolling:"touch" },
+  fadeTop:    { position:"sticky", top:0, height:70, background:`linear-gradient(to bottom,${SP.bg} 30%,transparent)`, zIndex:2, pointerEvents:"none", marginBottom:-70 },
+  fadeBot:    { position:"sticky", bottom:0, height:120, background:`linear-gradient(to top,${SP.bg} 40%,transparent)`, zIndex:2, pointerEvents:"none", marginTop:-120 },
 };
