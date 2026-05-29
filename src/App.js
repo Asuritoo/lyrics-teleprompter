@@ -799,7 +799,7 @@ export default function App() {
                 if (tracks.length === 0) { alert("Aucun titre trouvé dans le CSV"); return; }
 
                 // Confirm import
-                if (!window.confirm("Importer " + tracks.length + " titres dans la playlist \"" + playlistName + "\" ?\n\nCela peut prendre quelques minutes.")) return;
+                if (!window.confirm("Importer " + tracks.length + " titres dans " + playlistName + " ? Cela peut prendre quelques minutes.")) return;
 
                 // Create playlist and import
                 setImportingPlaylist("csv");
@@ -846,7 +846,7 @@ export default function App() {
                 setSongs(function(s) { return [...s, ...newSongs]; });
                 setPlaylists(function(p) { return [...p, newPlaylist]; });
                 setImportingPlaylist(null);
-                alert("✅ " + newSongs.length + " chansons importées dans \"" + playlistName + "\" !");
+                alert("Import terminé ! " + newSongs.length + " chansons dans " + playlistName);
                 setView("lib");
               }} />
             </label>
