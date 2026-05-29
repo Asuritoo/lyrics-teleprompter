@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
-const STORAGE_KEY = "lyrics_v5";
+const STORAGE_KEY = "lyrics_v6";
 const BACKEND = "https://lyrics-backend-production.up.railway.app";
 
 // ─── LRC parser ──────────────────────────────────────────────────────────────
@@ -31,7 +31,6 @@ function fmt(s) {
   return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
 }
 
-// ─── Wake Lock ───────────────────────────────────────────────────────────────
 function useWakeLock(on) {
   const ref = useRef(null);
   useEffect(() => {
@@ -41,8 +40,7 @@ function useWakeLock(on) {
   }, [on]);
 }
 
-// ─── Smooth scroll (iOS-safe, no CSS scroll-behavior) ────────────────────────
-function smoothScrollTo(el, target, duration = 280) {
+function smoothScrollTo(el, target, duration = 300) {
   if (!el) return;
   const start = el.scrollTop;
   const dist = target - start;
@@ -57,6 +55,44 @@ function smoothScrollTo(el, target, duration = 280) {
   requestAnimationFrame(step);
 }
 
+// ─── YouTube Player hook ─────────────────────────────────────────────────────
+function useYouTubePlayer(videoId, onReady) {
+  const playerRef = useRef(null);
+  const divId = "yt-player";
+
+  useEffect(() => {
+    if (!videoId) return;
+
+    function createPlayer() {
+      if (playerRef.current) { playerRef.current.destroy(); playerRef.current = null; }
+      playerRef.current = new window.YT.Player(divId, {
+        videoId,
+        playerVars: { autoplay: 0, controls: 1, rel: 0, modestbranding: 1, playsinline: 1 },
+        events: {
+          onReady: () => onReady?.(playerRef.current),
+          onError: () => {},
+        },
+      });
+    }
+
+    if (window.YT?.Player) {
+      createPlayer();
+    } else {
+      if (!document.getElementById("yt-script")) {
+        const tag = document.createElement("script");
+        tag.id = "yt-script";
+        tag.src = "https://www.youtube.com/iframe_api";
+        document.head.appendChild(tag);
+      }
+      window.onYouTubeIframeAPIReady = createPlayer;
+    }
+
+    return () => { playerRef.current?.destroy?.(); playerRef.current = null; };
+  }, [videoId]);
+
+  return playerRef;
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 export default function App() {
   const [songs, setSongs]     = useState(load);
@@ -68,34 +104,65 @@ export default function App() {
   const [delId, setDelId]     = useState(null);
 
   // Karaoke
-  const [playing, setPlaying]   = useState(false);
-  const [elapsed, setElapsed]   = useState(0);
+  const [playing, setPlaying]     = useState(false);
+  const [elapsed, setElapsed]     = useState(0);
   const [activeIdx, setActiveIdx] = useState(-1);
-  const [locked, setLocked]     = useState(false);
+  const [locked, setLocked]       = useState(false);
+  const [ytReady, setYtReady]     = useState(false);
+  const [ytBlocked, setYtBlocked] = useState(false);
+  const [showVideo, setShowVideo] = useState(true);
 
-  // Search lyrics
-  const [sq, setSq]           = useState({ title: "", artist: "" });
+  // Search
+  const [sq, setSq]               = useState({ title: "", artist: "" });
   const [searching, setSearching] = useState(false);
   const [searchMsg, setSearchMsg] = useState("");
 
   // Refs
   const elapsedRef    = useRef(0);
-  const playingRef    = useRef(false);
-  const startTsRef    = useRef(null); // performance.now() when play started
-  const baseElapsed   = useRef(0);    // elapsed at the moment play was pressed
+  const baseElapsed   = useRef(0);
+  const startTsRef    = useRef(null);
   const rafRef        = useRef(null);
+  const syncRafRef    = useRef(null);
   const scrollRef     = useRef(null);
   const lineRefs      = useRef([]);
-  const activeRef     = useRef(null);
+  const ytPlayerRef   = useRef(null);
+  const usingYT       = useRef(false);
 
   useWakeLock(view === "karaoke" && playing);
   useEffect(() => save(songs), [songs]);
 
-  // ── RAF timer — uses performance.now() for precision ──
-  useEffect(() => {
-    if (view !== "karaoke") return;
+  // ── YouTube Player init ──
+  const ytPlayer = useYouTubePlayer(
+    view === "karaoke" ? active?.videoId : null,
+    (player) => {
+      ytPlayerRef.current = player;
+      usingYT.current = true;
+      setYtReady(true);
+    }
+  );
 
-    if (playing) {
+  // ── Sync loop: read YT time OR use manual timer ──
+  useEffect(() => {
+    if (view !== "karaoke" || !playing) {
+      cancelAnimationFrame(syncRafRef.current);
+      cancelAnimationFrame(rafRef.current);
+      if (!playing) baseElapsed.current = elapsedRef.current;
+      return;
+    }
+
+    if (usingYT.current && ytPlayerRef.current) {
+      // YouTube mode — poll player.getCurrentTime()
+      const poll = () => {
+        try {
+          const t = ytPlayerRef.current?.getCurrentTime?.() ?? 0;
+          elapsedRef.current = t;
+          setElapsed(t);
+        } catch {}
+        syncRafRef.current = requestAnimationFrame(poll);
+      };
+      syncRafRef.current = requestAnimationFrame(poll);
+    } else {
+      // Manual timer mode
       startTsRef.current = performance.now();
       const tick = () => {
         const e = baseElapsed.current + (performance.now() - startTsRef.current) / 1000;
@@ -104,27 +171,27 @@ export default function App() {
         rafRef.current = requestAnimationFrame(tick);
       };
       rafRef.current = requestAnimationFrame(tick);
-    } else {
-      cancelAnimationFrame(rafRef.current);
-      baseElapsed.current = elapsedRef.current;
     }
 
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [playing, view]);
+    return () => {
+      cancelAnimationFrame(syncRafRef.current);
+      cancelAnimationFrame(rafRef.current);
+    };
+  }, [playing, view, ytReady]);
 
-  // ── Active line detection ──
+  // ── Active line ──
   useEffect(() => {
     if (!active?.syncedLines) return;
     const lines = active.syncedLines;
     let idx = 0;
     for (let i = 0; i < lines.length; i++) {
-      if (lines[i].time <= elapsed + 0.1) idx = i;
+      if (lines[i].time <= elapsed + 0.15) idx = i;
       else break;
     }
     if (idx !== activeIdx) setActiveIdx(idx);
   }, [elapsed, active]);
 
-  // ── Scroll active line to center (iOS-safe) ──
+  // ── Scroll to active line ──
   useEffect(() => {
     if (activeIdx < 0 || !scrollRef.current || !lineRefs.current[activeIdx]) return;
     const container = scrollRef.current;
@@ -140,40 +207,72 @@ export default function App() {
     elapsedRef.current = 0;
     baseElapsed.current = 0;
     startTsRef.current = null;
+    usingYT.current = false;
     setPlaying(false);
-    playingRef.current = false;
+    setYtReady(false);
+    setYtBlocked(false);
     setActiveIdx(-1);
     setLocked(false);
+    setShowVideo(true);
     lineRefs.current = [];
     setView("karaoke");
   }
 
   function stopKaraoke() {
     cancelAnimationFrame(rafRef.current);
+    cancelAnimationFrame(syncRafRef.current);
+    ytPlayerRef.current?.stopVideo?.();
     setPlaying(false);
-    playingRef.current = false;
+    usingYT.current = false;
     setActive(null);
     setElapsed(0);
     elapsedRef.current = 0;
     baseElapsed.current = 0;
+    setYtReady(false);
     setView("lib");
   }
 
   function togglePlay() {
     vibrate(8);
-    setPlaying(p => {
-      playingRef.current = !p;
-      return !p;
-    });
+    if (usingYT.current && ytPlayerRef.current) {
+      const state = ytPlayerRef.current.getPlayerState?.();
+      if (state === 1) ytPlayerRef.current.pauseVideo();
+      else ytPlayerRef.current.playVideo();
+      setPlaying(p => !p);
+    } else {
+      if (!playing) startTsRef.current = performance.now() - baseElapsed.current * 1000;
+      else baseElapsed.current = elapsedRef.current;
+      setPlaying(p => !p);
+    }
   }
 
   function seek(delta) {
     vibrate(12);
-    const next = Math.max(0, elapsedRef.current + delta);
-    elapsedRef.current = next;
-    baseElapsed.current = next;
-    startTsRef.current = performance.now();
-    setElapsed(next);
+    if (usingYT.current && ytPlayerRef.current) {
+      const cur = ytPlayerRef.current.getCurrentTime?.() ?? 0;
+      ytPlayerRef.current.seekTo(Math.max(0, cur + delta), true);
+    } else {
+      const next = Math.max(0, elapsedRef.current + delta);
+      elapsedRef.current = next;
+      baseElapsed.current = next;
+      startTsRef.current = performance.now();
+      setElapsed(next);
+    }
+  }
+
+  // Tap on lyric line → seek to its timestamp
+  function seekToLine(line) {
+    vibrate(10);
+    if (usingYT.current && ytPlayerRef.current) {
+      ytPlayerRef.current.seekTo(line.time, true);
+      if (!playing) { ytPlayerRef.current.playVideo(); setPlaying(true); }
+    } else {
+      elapsedRef.current = line.time;
+      baseElapsed.current = line.time;
+      startTsRef.current = performance.now();
+      setElapsed(line.time);
+      if (!playing) setPlaying(true);
+    }
   }
 
   function openEdit(song = null) {
@@ -191,7 +290,7 @@ export default function App() {
     setView("lib");
   }
 
-  async function fetchLyrics() {
+  async function fetchAll() {
     if (!sq.title.trim()) return;
     setSearching(true);
     setSearchMsg("Recherche en cours...");
@@ -203,15 +302,22 @@ export default function App() {
       const synced = parseLRC(data.synced);
       setForm(f => ({
         ...f,
-        title: data.title || f.title,
-        artist: data.artist || f.artist,
+        title: data.title || sq.title,
+        artist: data.artist || sq.artist,
         lyrics: data.plain || (synced?.map(l => l.text).join("\n") ?? ""),
         syncedLines: synced,
+        videoId: data.videoId || null,
+        videoTitle: data.videoTitle || null,
+        thumbnail: data.thumbnail || null,
       }));
-      if (synced) setSearchMsg("✅ Paroles synchronisées trouvées ! Mode karaoké activé.");
-      else setSearchMsg("⚠️ Paroles trouvées mais sans synchronisation.");
+      const parts = [];
+      if (synced) parts.push("✅ Paroles synchronisées");
+      else if (data.plain) parts.push("⚠️ Paroles sans sync");
+      if (data.videoId) parts.push("✅ Vidéo YouTube trouvée");
+      else parts.push("❌ Vidéo YouTube introuvable");
+      setSearchMsg(parts.join(" · "));
     } catch {
-      setSearchMsg("❌ Introuvable. Essaie un autre titre ou artiste.");
+      setSearchMsg("❌ Introuvable. Vérifie le titre ou l'artiste.");
     } finally {
       setSearching(false);
     }
@@ -235,6 +341,7 @@ export default function App() {
     const lines = active.syncedLines;
     const hasSynced = !!lines;
     const fontSize = active.fontSize ?? 24;
+    const hasYT = !!active.videoId;
 
     return (
       <div style={S.singWrap}>
@@ -249,11 +356,16 @@ export default function App() {
                 <div style={S.singTitle}>{active.title}</div>
                 {active.artist && <div style={S.singArtist}>{active.artist}</div>}
               </div>
-              <Btn onClick={() => seek(-3)} style={S.iconBtn}>−3s</Btn>
+              {hasYT && (
+                <Btn onClick={() => setShowVideo(v => !v)} style={{ ...S.iconBtn, color: showVideo ? GOLD : "#aaa" }}>
+                  {showVideo ? "🎬" : "🎵"}
+                </Btn>
+              )}
+              <Btn onClick={() => seek(-5)} style={S.iconBtn}>−5s</Btn>
               <Btn onClick={togglePlay} style={{ ...S.playBtn, background: playing ? GOLD : "#232630" }}>
                 <span style={{ color: playing ? "#000" : "#fff", fontSize: 22 }}>{playing ? "⏸" : "▶"}</span>
               </Btn>
-              <Btn onClick={() => seek(3)} style={S.iconBtn}>+3s</Btn>
+              <Btn onClick={() => seek(5)} style={S.iconBtn}>+5s</Btn>
               <Btn onClick={() => { vibrate(20); setLocked(true); }} style={S.iconBtn}>🔒</Btn>
             </>
           ) : (
@@ -267,46 +379,92 @@ export default function App() {
           )}
         </div>
 
-        {/* Timer bar */}
+        {/* YouTube player */}
+        {hasYT && (
+          <div style={{
+            ...S.ytWrap,
+            height: showVideo ? 200 : 0,
+            overflow: "hidden",
+            transition: "height 0.3s ease",
+          }}>
+            <div id="yt-player" style={{ width: "100%", height: "100%" }} />
+            {ytBlocked && (
+              <div style={S.ytBlocked}>
+                ⚠️ Cette vidéo bloque l'intégration.<br />Lance-la sur YouTube + appuie sur ▶ ici.
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Timer */}
         <div style={S.timerBar}>
-          <span style={{ fontFamily: "monospace", fontSize: 13, color: playing ? "#666" : "#444" }}>
-            {fmt(elapsed)}
-          </span>
-          {!playing && elapsed < 0.5 && (
-            <span style={{ color: "#3a3d48", fontSize: 12, marginLeft: 10, animation: "pulse 2s infinite" }}>
+          <span style={{ fontFamily: "monospace", fontSize: 13, color: "#555" }}>{fmt(elapsed)}</span>
+          {!playing && elapsed < 0.5 && !hasYT && (
+            <span style={{ color: "#333", fontSize: 11, marginLeft: 10, animation: "pulse 2s infinite" }}>
               Lance ta musique puis appuie sur ▶
+            </span>
+          )}
+          {!playing && elapsed < 0.5 && hasYT && (
+            <span style={{ color: "#333", fontSize: 11, marginLeft: 10, animation: "pulse 2s infinite" }}>
+              Appuie sur ▶ pour démarrer
             </span>
           )}
         </div>
 
-        {/* Lyrics scroll */}
+        {/* Lyrics */}
         <div ref={scrollRef} style={S.lyricsScroll}>
           <div style={S.fadeTop} />
           <div style={S.fadeBot} />
-
-          <div style={{ padding: "100px 16px 200px" }}>
+          <div style={{ padding: "80px 16px 200px" }}>
             {hasSynced ? lines.map((line, i) => {
               const isCurrent = i === activeIdx;
               const isPast    = i < activeIdx;
+              const isNext    = i === activeIdx + 1;
+
+              // Barre de progression entre lignes (pause > 1.5s)
+              const nextLine  = lines[i + 1];
+              const gap       = nextLine ? nextLine.time - line.time : 0;
+              const showBar   = gap > 1.5 && isCurrent && playing;
+              const barProgress = showBar
+                ? Math.min(1, (elapsed - line.time) / gap)
+                : 0;
+
               return (
-                <div
-                  key={i}
-                  ref={el => lineRefs.current[i] = el}
-                  style={{
-                    textAlign: "center",
-                    maxWidth: 580,
-                    margin: "0 auto",
-                    padding: "5px 4px",
-                    fontSize: isCurrent ? fontSize : Math.round(fontSize * 0.72),
-                    fontWeight: isCurrent ? 700 : 400,
-                    color: isCurrent ? GOLD : isPast ? "#252830" : "#4a4e5a",
-                    transition: "font-size 0.25s ease, color 0.25s ease, font-weight 0.25s ease",
-                    willChange: "color, font-size",
-                    lineHeight: 1.5,
-                    letterSpacing: isCurrent ? "0.02em" : "normal",
-                  }}
-                >
-                  {line.text}
+                <div key={i}>
+                  <div
+                    ref={el => lineRefs.current[i] = el}
+                    onClick={() => hasSynced && seekToLine(line)}
+                    style={{
+                      textAlign: "center",
+                      maxWidth: 580,
+                      margin: "0 auto",
+                      padding: "5px 8px",
+                      fontSize: isCurrent ? fontSize : isNext ? Math.round(fontSize * 0.85) : Math.round(fontSize * 0.68),
+                      fontWeight: isCurrent ? 700 : isNext ? 500 : 400,
+                      color: isCurrent ? GOLD : isPast ? "#222530" : isNext ? "#5a5e6a" : "#3a3e4a",
+                      transition: "font-size 0.2s ease, color 0.2s ease",
+                      willChange: "color, font-size",
+                      lineHeight: 1.5,
+                      letterSpacing: isCurrent ? "0.02em" : "normal",
+                      cursor: "pointer",
+                      WebkitTapHighlightColor: "transparent",
+                    }}
+                  >
+                    {line.text}
+                  </div>
+
+                  {/* Barre de progression pendant les pauses */}
+                  {gap > 1.5 && (
+                    <div style={{ margin: "8px auto", maxWidth: 200, height: 2, background: "#1a1d28", borderRadius: 2, overflow: "hidden" }}>
+                      <div style={{
+                        height: "100%",
+                        width: isCurrent && playing ? `${barProgress * 100}%` : isPast ? "100%" : "0%",
+                        background: isCurrent ? GOLD : "#2a2d38",
+                        transition: isCurrent ? "none" : "width 0s",
+                        borderRadius: 2,
+                      }} />
+                    </div>
+                  )}
                 </div>
               );
             }) : (
@@ -341,25 +499,34 @@ export default function App() {
           <div style={S.searchBox}>
             <div style={S.searchBoxLabel}>🔍 Recherche automatique</div>
             <input value={sq.title} onChange={e => setSq(q => ({ ...q, title: e.target.value }))}
-              onKeyDown={e => e.key === "Enter" && fetchLyrics()}
+              onKeyDown={e => e.key === "Enter" && fetchAll()}
               placeholder="Titre *" style={S.input} />
             <input value={sq.artist} onChange={e => setSq(q => ({ ...q, artist: e.target.value }))}
-              onKeyDown={e => e.key === "Enter" && fetchLyrics()}
+              onKeyDown={e => e.key === "Enter" && fetchAll()}
               placeholder="Artiste (recommandé)" style={{ ...S.input, marginTop: 8 }} />
-            <Btn onClick={fetchLyrics} style={{
+            <Btn onClick={fetchAll} style={{
               ...S.searchBtn,
               background: searching ? "#1c2030" : GOLD,
               color: searching ? "#555" : "#000",
             }}>
-              {searching ? "Recherche..." : "🎵 Trouver les paroles"}
+              {searching ? "Recherche..." : "🎵 Trouver paroles + vidéo"}
             </Btn>
             {searchMsg && (
-              <div style={{
-                marginTop: 10, fontSize: 13, lineHeight: 1.4,
-                color: searchMsg.startsWith("✅") ? "#7ec87e" : searchMsg.startsWith("⚠️") ? GOLD : "#e07070"
-              }}>{searchMsg}</div>
+              <div style={{ marginTop: 10, fontSize: 13, lineHeight: 1.5, color: "#aaa" }}>
+                {searchMsg}
+              </div>
             )}
           </div>
+
+          {/* YouTube preview */}
+          {form.videoId && (
+            <div style={{ marginTop: 12, borderRadius: 12, overflow: "hidden", border: `1px solid ${BORDER}` }}>
+              <img src={form.thumbnail} alt="" style={{ width: "100%", display: "block" }} />
+              <div style={{ background: CARD, padding: "8px 12px", fontSize: 12, color: "#888" }}>
+                🎬 {form.videoTitle}
+              </div>
+            </div>
+          )}
 
           <div style={S.divider}>— ou entre les paroles manuellement —</div>
 
@@ -381,9 +548,7 @@ export default function App() {
           </div>
 
           {form.syncedLines && (
-            <div style={S.syncBadge}>
-              ✅ {form.syncedLines.length} lignes synchronisées — karaoké disponible !
-            </div>
+            <div style={S.syncBadge}>✅ {form.syncedLines.length} lignes synchronisées — karaoké disponible !</div>
           )}
 
           <label style={S.label}>Taille du texte — <span style={{ color: GOLD }}>{form.fontSize ?? 24}px</span></label>
@@ -414,7 +579,6 @@ export default function App() {
   return (
     <div style={S.page}>
       <style>{globalCSS}</style>
-
       <div style={S.libHeader}>
         <div>
           <div style={S.appLabel}>🎤 LYRICS</div>
@@ -422,14 +586,12 @@ export default function App() {
         </div>
         <Btn onClick={() => openEdit()} style={S.addBtn}>+ Nouvelle</Btn>
       </div>
-
       <div style={S.searchWrap}>
         <span style={{ padding: "0 10px 0 14px", color: MUTED, fontSize: 15 }}>🔍</span>
         <input value={search} onChange={e => setSearch(e.target.value)}
           placeholder="Rechercher..." style={S.searchInput} />
         {search && <Btn onClick={() => setSearch("")} style={S.clearBtn}>✕</Btn>}
       </div>
-
       <div style={S.list}>
         {filtered.length === 0 && (
           <div style={S.empty}>
@@ -448,7 +610,6 @@ export default function App() {
         ))}
         <div style={{ height: 40 }} />
       </div>
-
       {delId && (
         <div style={S.overlay} onClick={() => setDelId(null)}>
           <div style={S.sheet} onClick={e => e.stopPropagation()}>
@@ -480,19 +641,20 @@ function SongRow({ song, onSing, onEdit, onDelete }) {
       <div style={S.rowDelete}>
         <Btn onClick={onDelete} style={{ background: "transparent", color: "#fff", fontSize: 22, padding: "8px", border: "none", cursor: "pointer" }}>🗑️</Btn>
       </div>
-      <div
-        style={{ ...S.row, transform: `translateX(${dx}px)`, transition: (dx === 0 || dx === -80) ? "transform .22s ease" : "none" }}
-        onTouchStart={ts} onTouchMove={tm} onTouchEnd={te}
-      >
+      <div style={{ ...S.row, transform: `translateX(${dx}px)`, transition: (dx === 0 || dx === -80) ? "transform .22s ease" : "none" }}
+        onTouchStart={ts} onTouchMove={tm} onTouchEnd={te}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={S.rowTitle}>{song.title}</div>
           <div style={S.rowSub}>
             {song.artist || <em style={{ opacity: .5 }}>Artiste inconnu</em>}
-            {song.syncedLines && <span style={{ color: GOLD, marginLeft: 8, fontSize: 10 }}>● KARAOKÉ</span>}
+            {song.syncedLines && <span style={{ color: GOLD, marginLeft: 6, fontSize: 10 }}>● KARAOKÉ</span>}
+            {song.videoId && <span style={{ color: "#6a8fff", marginLeft: 6, fontSize: 10 }}>▶ YT</span>}
           </div>
         </div>
         <Btn onClick={onEdit} style={S.editBtn}>✏️</Btn>
-        <Btn onClick={onSing} style={S.singBtn}>{song.syncedLines ? "🎤" : "▶"} {song.syncedLines ? "Karaoké" : "Chanter"}</Btn>
+        <Btn onClick={onSing} style={S.singBtn}>
+          {song.syncedLines ? "🎤" : "▶"} {song.syncedLines ? "Karaoké" : "Chanter"}
+        </Btn>
       </div>
     </div>
   );
@@ -506,9 +668,10 @@ function Btn({ onClick, style, children }) {
   );
 }
 
-function emptyForm() { return { title: "", artist: "", lyrics: "", syncedLines: null, fontSize: 24 }; }
+function emptyForm() {
+  return { title: "", artist: "", lyrics: "", syncedLines: null, fontSize: 24, videoId: null, videoTitle: null, thumbnail: null };
+}
 
-// ─── Constants ────────────────────────────────────────────────────────────────
 const GOLD   = "#e8c97a";
 const BG     = "#0d0f14";
 const CARD   = "#13161d";
@@ -518,58 +681,58 @@ const MUTED  = "#555";
 
 const globalCSS = `
   *, *::before, *::after { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  html, body { overflow: hidden; position: fixed; width: 100%; height: 100%; overscroll-behavior: none; -webkit-overflow-scrolling: auto; }
+  html, body { overflow: hidden; position: fixed; width: 100%; height: 100%; overscroll-behavior: none; }
   input, textarea { -webkit-appearance: none; appearance: none; }
-  @keyframes pulse { 0%,100%{opacity:.25} 50%{opacity:.8} }
-  @keyframes fadein { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:none} }
+  @keyframes pulse { 0%,100%{opacity:.2} 50%{opacity:.8} }
 `;
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
 const S = {
-  page:       { height: "100dvh", background: BG, color: TEXT, fontFamily: "'Georgia',serif", display: "flex", flexDirection: "column", overflow: "hidden" },
-  libHeader:  { display: "flex", alignItems: "flex-end", justifyContent: "space-between", padding: "0 16px 14px", paddingTop: "max(20px,env(safe-area-inset-top))", borderBottom: `1px solid ${BORDER}`, flexShrink: 0 },
-  appLabel:   { fontSize: 10, letterSpacing: "0.22em", color: GOLD, textTransform: "uppercase", marginBottom: 3 },
-  appTitle:   { fontSize: 26, fontWeight: 700, color: "#f0e8d0", lineHeight: 1 },
-  addBtn:     { background: GOLD, color: "#000", borderRadius: 22, padding: "10px 18px", fontSize: 15, fontWeight: 700 },
-  searchWrap: { display: "flex", alignItems: "center", margin: "12px 16px 0", background: CARD, borderRadius: 12, border: `1px solid ${BORDER}`, overflow: "hidden", flexShrink: 0 },
-  searchInput:{ flex: 1, background: "transparent", border: "none", outline: "none", color: TEXT, fontSize: 15, padding: "13px 0", fontFamily: "inherit" },
-  clearBtn:   { background: "transparent", color: MUTED, padding: "10px 14px", fontSize: 18 },
-  list:       { flex: 1, overflowY: "auto", padding: "12px 16px 0", WebkitOverflowScrolling: "touch" },
-  empty:      { textAlign: "center", padding: "60px 20px" },
-  row:        { background: CARD, border: `1px solid ${BORDER}`, borderRadius: 14, padding: "13px 12px", display: "flex", alignItems: "center", gap: 8, position: "relative", zIndex: 1, willChange: "transform", userSelect: "none" },
-  rowTitle:   { fontSize: 15, fontWeight: 600, color: "#f0e8d0", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
-  rowSub:     { fontSize: 12, color: "#666", marginTop: 2 },
-  rowDelete:  { position: "absolute", right: 0, top: 0, bottom: 0, background: "#c0504d", borderRadius: 14, display: "flex", alignItems: "center", justifyContent: "flex-end", paddingRight: 16, minWidth: 80 },
-  editBtn:    { background: "#1c2030", color: MUTED, borderRadius: 10, padding: "8px 10px", fontSize: 15, flexShrink: 0 },
-  singBtn:    { background: GOLD, color: "#000", borderRadius: 22, padding: "9px 14px", fontSize: 14, fontWeight: 700, flexShrink: 0, whiteSpace: "nowrap" },
-  overlay:    { position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "flex-end", zIndex: 200 },
-  sheet:      { background: "#181b24", borderRadius: "20px 20px 0 0", padding: "28px 20px", paddingBottom: "max(28px,env(safe-area-inset-bottom))", width: "100%", textAlign: "center" },
-  sheetTitle: { fontWeight: 700, fontSize: 18, color: "#f0e8d0", marginBottom: 6 },
-  sheetSub:   { color: MUTED, fontSize: 14, marginBottom: 24 },
-  delConfirm: { display: "block", width: "100%", background: "#c0504d", color: "#fff", borderRadius: 14, padding: "15px", fontSize: 16, fontWeight: 700, marginBottom: 10 },
-  delCancel:  { display: "block", width: "100%", background: "#1c2030", color: TEXT, borderRadius: 14, padding: "15px", fontSize: 16 },
-  editHeader: { display: "flex", alignItems: "center", gap: 12, padding: "0 16px 14px", paddingTop: "max(16px,env(safe-area-inset-top))", borderBottom: `1px solid ${BORDER}`, flexShrink: 0 },
-  backBtn:    { background: "#1c2030", color: MUTED, borderRadius: 10, padding: "9px 14px", fontSize: 14 },
-  pageTitle:  { fontSize: 18, fontWeight: 700, color: "#f0e8d0" },
-  editBody:   { flex: 1, overflowY: "auto", padding: "12px 16px", paddingBottom: "max(24px,env(safe-area-inset-bottom))", WebkitOverflowScrolling: "touch" },
-  searchBox:  { background: "#0e1520", border: `1px solid ${GOLD}44`, borderRadius: 14, padding: "14px", marginBottom: 4 },
+  page:        { height: "100dvh", background: BG, color: TEXT, fontFamily: "'Georgia',serif", display: "flex", flexDirection: "column", overflow: "hidden" },
+  libHeader:   { display: "flex", alignItems: "flex-end", justifyContent: "space-between", padding: "0 16px 14px", paddingTop: "max(20px,env(safe-area-inset-top))", borderBottom: `1px solid ${BORDER}`, flexShrink: 0 },
+  appLabel:    { fontSize: 10, letterSpacing: "0.22em", color: GOLD, textTransform: "uppercase", marginBottom: 3 },
+  appTitle:    { fontSize: 26, fontWeight: 700, color: "#f0e8d0", lineHeight: 1 },
+  addBtn:      { background: GOLD, color: "#000", borderRadius: 22, padding: "10px 18px", fontSize: 15, fontWeight: 700 },
+  searchWrap:  { display: "flex", alignItems: "center", margin: "12px 16px 0", background: CARD, borderRadius: 12, border: `1px solid ${BORDER}`, overflow: "hidden", flexShrink: 0 },
+  searchInput: { flex: 1, background: "transparent", border: "none", outline: "none", color: TEXT, fontSize: 15, padding: "13px 0", fontFamily: "inherit" },
+  clearBtn:    { background: "transparent", color: MUTED, padding: "10px 14px", fontSize: 18 },
+  list:        { flex: 1, overflowY: "auto", padding: "12px 16px 0", WebkitOverflowScrolling: "touch" },
+  empty:       { textAlign: "center", padding: "60px 20px" },
+  row:         { background: CARD, border: `1px solid ${BORDER}`, borderRadius: 14, padding: "13px 12px", display: "flex", alignItems: "center", gap: 8, position: "relative", zIndex: 1, willChange: "transform", userSelect: "none" },
+  rowTitle:    { fontSize: 15, fontWeight: 600, color: "#f0e8d0", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  rowSub:      { fontSize: 12, color: "#666", marginTop: 2 },
+  rowDelete:   { position: "absolute", right: 0, top: 0, bottom: 0, background: "#c0504d", borderRadius: 14, display: "flex", alignItems: "center", justifyContent: "flex-end", paddingRight: 16, minWidth: 80 },
+  editBtn:     { background: "#1c2030", color: MUTED, borderRadius: 10, padding: "8px 10px", fontSize: 15, flexShrink: 0 },
+  singBtn:     { background: GOLD, color: "#000", borderRadius: 22, padding: "9px 14px", fontSize: 14, fontWeight: 700, flexShrink: 0, whiteSpace: "nowrap" },
+  overlay:     { position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "flex-end", zIndex: 200 },
+  sheet:       { background: "#181b24", borderRadius: "20px 20px 0 0", padding: "28px 20px", paddingBottom: "max(28px,env(safe-area-inset-bottom))", width: "100%", textAlign: "center" },
+  sheetTitle:  { fontWeight: 700, fontSize: 18, color: "#f0e8d0", marginBottom: 6 },
+  sheetSub:    { color: MUTED, fontSize: 14, marginBottom: 24 },
+  delConfirm:  { display: "block", width: "100%", background: "#c0504d", color: "#fff", borderRadius: 14, padding: "15px", fontSize: 16, fontWeight: 700, marginBottom: 10 },
+  delCancel:   { display: "block", width: "100%", background: "#1c2030", color: TEXT, borderRadius: 14, padding: "15px", fontSize: 16 },
+  editHeader:  { display: "flex", alignItems: "center", gap: 12, padding: "0 16px 14px", paddingTop: "max(16px,env(safe-area-inset-top))", borderBottom: `1px solid ${BORDER}`, flexShrink: 0 },
+  backBtn:     { background: "#1c2030", color: MUTED, borderRadius: 10, padding: "9px 14px", fontSize: 14 },
+  pageTitle:   { fontSize: 18, fontWeight: 700, color: "#f0e8d0" },
+  editBody:    { flex: 1, overflowY: "auto", padding: "12px 16px", paddingBottom: "max(24px,env(safe-area-inset-bottom))", WebkitOverflowScrolling: "touch" },
+  searchBox:   { background: "#0e1520", border: `1px solid ${GOLD}44`, borderRadius: 14, padding: "14px", marginBottom: 4 },
   searchBoxLabel: { fontSize: 11, letterSpacing: "0.15em", color: GOLD, textTransform: "uppercase", marginBottom: 10 },
-  searchBtn:  { borderRadius: 12, padding: "13px", fontSize: 15, fontWeight: 700, width: "100%", marginTop: 10 },
-  divider:    { textAlign: "center", color: "#2a2d38", fontSize: 12, margin: "14px 0 2px" },
-  label:      { display: "block", fontSize: 11, letterSpacing: "0.12em", textTransform: "uppercase", color: MUTED, marginBottom: 6, marginTop: 16 },
-  input:      { width: "100%", background: CARD, border: `1px solid ${BORDER}`, borderRadius: 12, padding: "13px 14px", color: TEXT, fontSize: 15, fontFamily: "inherit", outline: "none", display: "block" },
-  pasteBtn:   { position: "absolute", top: 10, right: 10, background: GOLD, color: "#000", borderRadius: 10, padding: "6px 10px", fontSize: 12, fontWeight: 700 },
-  syncBadge:  { background: "#0a1a0a", border: "1px solid #2a4a2a", borderRadius: 10, padding: "10px 14px", marginTop: 8, fontSize: 13, color: "#7ec87e" },
-  sliderRow:  { display: "flex", alignItems: "center", gap: 10, margin: "6px 0 4px" },
-  saveBtn:    { display: "block", width: "100%", borderRadius: 14, padding: "16px", fontSize: 16, fontWeight: 700, marginTop: 24, marginBottom: 8 },
-  singWrap:   { position: "fixed", inset: 0, background: "#07090e", display: "flex", flexDirection: "column", fontFamily: "'Georgia',serif", userSelect: "none" },
-  singBar:    { display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", paddingTop: "max(10px,env(safe-area-inset-top))", background: "rgba(8,10,16,0.95)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", borderBottom: `1px solid ${BORDER}`, flexShrink: 0, zIndex: 10, minHeight: 58 },
-  timerBar:   { display: "flex", alignItems: "center", justifyContent: "center", padding: "5px 16px", flexShrink: 0, minHeight: 28 },
-  iconBtn:    { background: "#1c2030", color: "#aaa", borderRadius: 10, padding: "9px 12px", fontSize: 13, flexShrink: 0, whiteSpace: "nowrap" },
-  playBtn:    { borderRadius: 24, width: 48, height: 48, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
-  singTitle:  { fontSize: 13, fontWeight: 700, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
-  singArtist: { fontSize: 11, color: "#555", marginTop: 1 },
-  lyricsScroll: { flex: 1, overflowY: "auto", position: "relative", WebkitOverflowScrolling: "touch" },
-  fadeTop:    { position: "sticky", top: 0, left: 0, right: 0, height: 80, background: "linear-gradient(to bottom,#07090e 35%,transparent)", zIndex: 2, pointerEvents: "none", marginBottom: -80 },
-  fadeBot:    { position: "sticky", bottom: 0, left: 0, right: 0, height: 140, background: "linear-gradient(to top,#07090e 45%,transparent)", zIndex: 2, pointerEvents: "none", marginTop: -140 },
+  searchBtn:   { borderRadius: 12, padding: "13px", fontSize: 15, fontWeight: 700, width: "100%", marginTop: 10 },
+  divider:     { textAlign: "center", color: "#2a2d38", fontSize: 12, margin: "14px 0 2px" },
+  label:       { display: "block", fontSize: 11, letterSpacing: "0.12em", textTransform: "uppercase", color: MUTED, marginBottom: 6, marginTop: 16 },
+  input:       { width: "100%", background: CARD, border: `1px solid ${BORDER}`, borderRadius: 12, padding: "13px 14px", color: TEXT, fontSize: 15, fontFamily: "inherit", outline: "none", display: "block" },
+  pasteBtn:    { position: "absolute", top: 10, right: 10, background: GOLD, color: "#000", borderRadius: 10, padding: "6px 10px", fontSize: 12, fontWeight: 700 },
+  syncBadge:   { background: "#0a1a0a", border: "1px solid #2a4a2a", borderRadius: 10, padding: "10px 14px", marginTop: 8, fontSize: 13, color: "#7ec87e" },
+  sliderRow:   { display: "flex", alignItems: "center", gap: 10, margin: "6px 0 4px" },
+  saveBtn:     { display: "block", width: "100%", borderRadius: 14, padding: "16px", fontSize: 16, fontWeight: 700, marginTop: 24, marginBottom: 8 },
+  singWrap:    { position: "fixed", inset: 0, background: "#07090e", display: "flex", flexDirection: "column", fontFamily: "'Georgia',serif", userSelect: "none" },
+  singBar:     { display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", paddingTop: "max(10px,env(safe-area-inset-top))", background: "rgba(8,10,16,0.95)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", borderBottom: `1px solid ${BORDER}`, flexShrink: 0, zIndex: 10, minHeight: 58 },
+  ytWrap:      { flexShrink: 0, background: "#000", position: "relative" },
+  ytBlocked:   { position: "absolute", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", color: "#888", fontSize: 13, padding: 20 },
+  timerBar:    { display: "flex", alignItems: "center", justifyContent: "center", padding: "4px 16px", flexShrink: 0, minHeight: 26 },
+  iconBtn:     { background: "#1c2030", color: "#aaa", borderRadius: 10, padding: "9px 12px", fontSize: 13, flexShrink: 0, whiteSpace: "nowrap" },
+  playBtn:     { borderRadius: 24, width: 48, height: 48, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  singTitle:   { fontSize: 13, fontWeight: 700, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  singArtist:  { fontSize: 11, color: "#555", marginTop: 1 },
+  lyricsScroll:{ flex: 1, overflowY: "auto", position: "relative", WebkitOverflowScrolling: "touch" },
+  fadeTop:     { position: "sticky", top: 0, height: 70, background: "linear-gradient(to bottom,#07090e 30%,transparent)", zIndex: 2, pointerEvents: "none", marginBottom: -70 },
+  fadeBot:     { position: "sticky", bottom: 0, height: 120, background: "linear-gradient(to top,#07090e 40%,transparent)", zIndex: 2, pointerEvents: "none", marginTop: -120 },
 };
