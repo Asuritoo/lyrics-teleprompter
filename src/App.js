@@ -310,7 +310,7 @@ export default function App() {
   }, [activeIdx]);
 
   // ── Actions ──
-  function startSing(song) {
+  async function startSing(song) {
     // Properly clean up any existing player first
     try { ytPlayerRef.current?.stopVideo?.(); } catch {}
     try { ytPlayerRef.current?.destroy?.(); } catch {}
@@ -318,8 +318,24 @@ export default function App() {
     usingYT.current = false;
     cancelAnimationFrame(rafRef.current);
     cancelAnimationFrame(syncRafRef.current);
+
+    // Auto-fetch YouTube if not loaded yet
+    let finalSong = song;
+    if (!song.videoId) {
+      try {
+        const r = await fetch(BACKEND + "/search?title=" + encodeURIComponent(song.title) + "&artist=" + encodeURIComponent(song.artist || ""));
+        if (r.ok) {
+          const data = await r.json();
+          if (data.videoId) {
+            finalSong = { ...song, videoId: data.videoId, videoTitle: data.videoTitle, thumbnail: data.thumbnail };
+            setSongs(function(s) { return s.map(function(x) { return x.id === song.id ? finalSong : x; }); });
+          }
+        }
+      } catch {}
+    }
+
     // Reset all state
-    setActive(song);
+    setActive(finalSong);
     setElapsed(0); elapsedRef.current = 0; baseElapsed.current = 0; startTsRef.current = null;
     setPlaying(false); setYtReady(false); setYtBlocked(false);
     setActiveIdx(-1); setLocked(false); setShowVideo(true); setMuted(false);
@@ -810,14 +826,15 @@ export default function App() {
                 const newSongs = [];
 
                 // Import en parallèle par batch de 5 — 5x plus rapide
-                const BATCH = 5;
+                const BATCH = 10;
                 let done = 0;
                 for (let b = 0; b < tracks.length; b += BATCH) {
                   const batch = tracks.slice(b, b + BATCH);
                   const results = await Promise.all(batch.map(async function(track, j) {
                     const idx = b + j;
                     try {
-                      const r = await fetch(BACKEND + "/search?title=" + encodeURIComponent(track.title) + "&artist=" + encodeURIComponent(track.artist));
+                      // Import only fetches lyrics — YouTube loads on first play
+                      const r = await fetch(BACKEND + "/lyrics?title=" + encodeURIComponent(track.title) + "&artist=" + encodeURIComponent(track.artist));
                       if (r.ok) {
                         const data = await r.json();
                         const synced = parseLRC(data.synced);
@@ -827,9 +844,9 @@ export default function App() {
                           artist: data.artist || track.artist,
                           lyrics: data.plain || (synced ? synced.map(function(l) { return l.text; }).join("\n") : ""),
                           syncedLines: synced,
-                          videoId: data.videoId || null,
-                          videoTitle: data.videoTitle || null,
-                          thumbnail: data.thumbnail || null,
+                          videoId: null, // loaded on first play
+                          videoTitle: null,
+                          thumbnail: null,
                           fontSize: 24,
                         };
                       }
