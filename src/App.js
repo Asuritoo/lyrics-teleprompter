@@ -82,7 +82,7 @@ function useYouTubePlayer(videoId, onReady, onStateChange) {
           events: {
             onReady: e => onReady?.(e.target),
             onStateChange: e => onStateChange?.(e.data),
-            onError: () => {},
+            onError: (e) => { if(e.data===101||e.data===150) setYtBlocked(true); },
           },
         });
       } catch {}
@@ -152,6 +152,7 @@ export default function App() {
   const [locked, setLocked]       = useState(false);
   const [ytReady, setYtReady]     = useState(false);
   const [showVideo, setShowVideo] = useState(true);
+  const [ytBlocked, setYtBlocked] = useState(false);
   const [muted, setMuted]         = useState(false);
 
   // Search/edit
@@ -468,7 +469,11 @@ export default function App() {
           </>}
         </div>
         {/* YouTube */}
-        {hasYT&&<div style={{...S.ytWrap,height:showVideo?200:0}}><div id="yt-player" style={{width:"100%",height:"100%"}}/></div>}
+        {hasYT&&(
+          <div style={{...S.ytWrap,height:showVideo?200:0}}>
+            <div id="yt-player" style={{width:"100%",height:"100%"}}/>
+          </div>
+        )}
         {/* Timer */}
         <div style={S.timerRow}>
           <span style={{fontFamily:"monospace",fontSize:12,color:"#535353"}}>{fmt(elapsed)}</span>
@@ -507,11 +512,18 @@ export default function App() {
                   </div>;
                 })}
               </>;
-            })() : active.lyrics?.split("\n").map((line,i)=>(
-              <div key={i} style={{textAlign:"center",fontSize,color:"#fff",padding:"3px 16px",lineHeight:1.65,maxWidth:560,margin:"0 auto",fontFamily:"'Circular Std','Helvetica Neue',sans-serif"}}>
-                {line||<span style={{opacity:0}}>·</span>}
-              </div>
-            ))}
+            })() : active.lyrics && active.lyrics.trim()
+              ? active.lyrics.split("\n").map((line,i)=>(
+                  <div key={i} style={{textAlign:"center",fontSize,color:"#fff",padding:"3px 16px",lineHeight:1.65,maxWidth:560,margin:"0 auto",fontFamily:"'Circular Std','Helvetica Neue',sans-serif"}}>
+                    {line||<span style={{opacity:0}}>\u00b7</span>}
+                  </div>
+                ))
+              : <div style={{textAlign:"center",color:"#535353",padding:"60px 20px"}}>
+                  <div style={{fontSize:32,marginBottom:12}}>\U0001f3b5</div>
+                  <div style={{fontSize:15}}>Pas de paroles disponibles</div>
+                  <div style={{fontSize:13,marginTop:8}}>Lance ta musique sur Spotify</div>
+                </div>
+            }
             <div style={{height:120}}/>
           </div>
         </div>
