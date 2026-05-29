@@ -480,30 +480,50 @@ export default function App() {
   }
 
   async function loadSpotifyPlaylists() {
-    const token = spotifyToken || getSpotifyToken();
-    if (!token) { setSpotifyError("Token manquant. Reconnecte-toi."); return; }
-    setSpotifyLoading(true); setSpotifyError("");
+    let token = null;
+    try { token = spotifyToken || getSpotifyToken(); } catch {}
+    if (!token) {
+      setSpotifyLoading(false);
+      setSpotifyError("Token manquant. Reconnecte-toi.");
+      return;
+    }
+    setSpotifyLoading(true);
+    setSpotifyError("");
+    setSpotifyPlaylists([]);
     try {
       const r = await fetch("https://api.spotify.com/v1/me/playlists?limit=50", {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { Authorization: "Bearer " + token }
       });
       if (r.status === 401) {
-        localStorage.removeItem("spotify_token");
+        try { localStorage.removeItem("spotify_token"); } catch {}
         setSpotifyToken(null);
+        setSpotifyLoading(false);
         setSpotifyError("Session expirée. Reconnecte-toi.");
         return;
       }
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      const data = await r.json();
-      setSpotifyPlaylists(data.items || []);
+      if (!r.ok) {
+        setSpotifyLoading(false);
+        setSpotifyError("Erreur " + r.status + ". Reconnecte-toi.");
+        return;
+      }
+      let data = null;
+      try { data = await r.json(); } catch {
+        setSpotifyLoading(false);
+        setSpotifyError("Erreur de lecture. Reconnecte-toi.");
+        return;
+      }
+      setSpotifyPlaylists(Array.isArray(data?.items) ? data.items : []);
     } catch(e) {
-      setSpotifyError("Erreur : " + (e.message || "inconnue") + ". Reconnecte-toi.");
-    } finally {
-      setSpotifyLoading(false);
+      setSpotifyError("Erreur réseau. Reconnecte-toi.");
     }
+    setSpotifyLoading(false);
   }
 
-  useEffect(() => { if (view === "spotify" && spotifyToken) loadSpotifyPlaylists(); }, [view, spotifyToken]);
+  useEffect(() => {
+    if (view === "spotify" && spotifyToken) {
+      try { loadSpotifyPlaylists(); } catch {}
+    }
+  }, [view, spotifyToken]);
 
   async function importSpotifyPlaylist(spPlaylist) {
     const token = spotifyToken || getSpotifyToken();
