@@ -491,7 +491,7 @@ export default function App() {
     setSpotifyError("");
     setSpotifyPlaylists([]);
     try {
-      const r = await fetch("https://api.spotify.com/v1/me/playlists?limit=50&fields=items(id,name,tracks(total)),next,total", {
+      const r = await fetch("https://api.spotify.com/v1/me/playlists?limit=50", {
         headers: { Authorization: "Bearer " + token }
       });
       if (r.status === 401) {
@@ -772,7 +772,7 @@ export default function App() {
                       const d = await r.json();
                       const first = d.items && d.items[0];
                       if (first) {
-                        alert("DEBUG:\n" + JSON.stringify(first).slice(0, 400));
+                        alert("KEYS: " + Object.keys(first).join(", ") + "\n\ntracks: " + JSON.stringify(first.tracks) + "\n\nfull: " + JSON.stringify(first).slice(0, 300));
                       } else {
                         alert("Réponse vide:\n" + JSON.stringify(d).slice(0, 300));
                       }
