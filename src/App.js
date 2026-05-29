@@ -1,406 +1,364 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
-const STORAGE_KEY = "lyrics_v2";
+// ─── Storage ─────────────────────────────────────────────────────────────────
+const KEY = "lyrics_v3";
 
-const defaultSongs = [
-  {
-    id: "demo1",
-    title: "Exemple",
-    artist: "Comment utiliser l'appli",
-    speed: 45,
-    fontSize: 26,
-    lyrics: `Bienvenue dans Lyrics 🎤
+const DEMO = [{
+  id: "demo1",
+  title: "Exemple — lis moi !",
+  artist: "Guide rapide",
+  speed: 40,
+  fontSize: 24,
+  lyrics: `Bienvenue 🎤
 
-Appuie sur ▶ pour démarrer le défilement
-Règle la vitesse avec le curseur
+Appuie sur ▶ pour lancer le défilement
+Règle la vitesse avec le curseur en haut
 
-Tape à gauche pour reculer
-Tape à droite pour avancer
+─────────────
 
-Laisse une ligne vide entre les strophes
-Pour avoir une pause naturelle
+Pendant que ça défile :
+  Tape à GAUCHE pour reculer
+  Tape à DROITE pour avancer
+  Appuie au CENTRE pour pause
 
-Ajoute tes chansons avec le bouton +
-Colle les paroles depuis le presse-papier
+─────────────
 
-Bonne chanson ! 🎶`,
-  },
-];
+🔒 Appuie sur le cadenas
+pour verrouiller l'écran
+pendant que tu chantes
 
-function loadSongs() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch {}
-  return defaultSongs;
+─────────────
+
+Ajoute tes chansons avec +
+Colle les paroles d'un coup
+avec le bouton Coller 📋
+
+Bonne chanson ! 🎶`
+}];
+
+function load() {
+  try { const r = localStorage.getItem(KEY); if (r) return JSON.parse(r); } catch {}
+  return DEMO;
 }
-
-function saveSongs(songs) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(songs));
-  } catch {}
-}
-
-function vibrate(ms = 10) {
-  try { navigator.vibrate?.(ms); } catch {}
+function save(s) {
+  try { localStorage.setItem(KEY, JSON.stringify(s)); } catch {}
 }
 
 // ─── Wake Lock ───────────────────────────────────────────────────────────────
-function useWakeLock(active) {
-  const lockRef = useRef(null);
+function useWakeLock(on) {
+  const ref = useRef(null);
   useEffect(() => {
-    if (!active) { lockRef.current?.release?.(); lockRef.current = null; return; }
-    navigator.wakeLock?.request("screen").then(l => { lockRef.current = l; }).catch(() => {});
-    return () => { lockRef.current?.release?.(); lockRef.current = null; };
-  }, [active]);
+    if (!on) { ref.current?.release?.(); ref.current = null; return; }
+    navigator.wakeLock?.request("screen").then(l => ref.current = l).catch(() => {});
+    return () => { ref.current?.release?.(); ref.current = null; };
+  }, [on]);
 }
 
+// ─── App ─────────────────────────────────────────────────────────────────────
 export default function App() {
-  const [songs, setSongs] = useState(loadSongs);
-  const [view, setView] = useState("library"); // library | edit | sing
-  const [editSong, setEditSong] = useState(null);
-  const [activeSong, setActiveSong] = useState(null);
-  const [playing, setPlaying] = useState(false);
-  const [scrollY, setScrollY] = useState(0);
-  const [locked, setLocked] = useState(false);
-  const [search, setSearch] = useState("");
-  const [confirmDelete, setConfirmDelete] = useState(null);
-  const [form, setForm] = useState({ title: "", artist: "", lyrics: "", speed: 45, fontSize: 26 });
-  const [darkMode, setDarkMode] = useState(true);
-  const [showSettings, setShowSettings] = useState(false);
+  const [songs, setSongs]         = useState(load);
+  const [view, setView]           = useState("lib"); // lib | edit | sing
+  const [active, setActive]       = useState(null);
+  const [editTarget, setEditTarget] = useState(null);
+  const [playing, setPlaying]     = useState(false);
+  const [pos, setPos]             = useState(0);
+  const [locked, setLocked]       = useState(false);
+  const [search, setSearch]       = useState("");
+  const [delId, setDelId]         = useState(null);
+  const [form, setForm]           = useState(emptyForm());
 
-  const rafRef = useRef(null);
-  const lastTRef = useRef(null);
-  const containerRef = useRef(null);
-  const contentRef = useRef(null);
+  const rafRef    = useRef(null);
+  const lastT     = useRef(null);
+  const scrollRef = useRef(null);
+  const innerRef  = useRef(null);
+  const touchX    = useRef(null);
 
   useWakeLock(view === "sing" && playing);
-  useEffect(() => saveSongs(songs), [songs]);
+  useEffect(() => save(songs), [songs]);
 
-  // Lock orientation hint via meta (best effort on iOS Safari)
+  // ── Scroll animation ──
   useEffect(() => {
-    if (view === "sing") {
-      document.body.style.overflow = "hidden";
-    } else {
-      document.body.style.overflow = "";
-    }
-    return () => { document.body.style.overflow = ""; };
-  }, [view]);
-
-  // Auto scroll
-  useEffect(() => {
-    if (view !== "sing" || !playing) {
-      lastTRef.current = null;
-      cancelAnimationFrame(rafRef.current);
-      return;
-    }
-    const step = (ts) => {
-      if (lastTRef.current == null) lastTRef.current = ts;
-      const dt = (ts - lastTRef.current) / 1000;
-      lastTRef.current = ts;
-      setScrollY(prev => {
-        const max = contentRef.current
-          ? Math.max(0, contentRef.current.scrollHeight - containerRef.current.clientHeight)
+    if (view !== "sing" || !playing) { lastT.current = null; cancelAnimationFrame(rafRef.current); return; }
+    const tick = (ts) => {
+      if (!lastT.current) lastT.current = ts;
+      const dt = (ts - lastT.current) / 1000;
+      lastT.current = ts;
+      setPos(p => {
+        const max = innerRef.current && scrollRef.current
+          ? Math.max(0, innerRef.current.scrollHeight - scrollRef.current.clientHeight)
           : 0;
-        const next = prev + (activeSong?.speed ?? 45) * dt;
+        const next = p + (active?.speed ?? 40) * dt;
         if (next >= max) { setPlaying(false); return max; }
         return next;
       });
-      rafRef.current = requestAnimationFrame(step);
+      rafRef.current = requestAnimationFrame(tick);
     };
-    rafRef.current = requestAnimationFrame(step);
+    rafRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [playing, view, activeSong]);
+  }, [playing, view, active]);
 
   useEffect(() => {
-    if (containerRef.current) containerRef.current.scrollTop = scrollY;
-  }, [scrollY]);
+    if (scrollRef.current) scrollRef.current.scrollTop = pos;
+  }, [pos]);
 
-  // Tap left/right to rewind/forward
-  const handleSingTap = useCallback((e) => {
-    if (locked) return;
-    const x = e.touches?.[0]?.clientX ?? e.clientX;
+  // ── Tap zones (sing view) ──
+  const onTouchStart = useCallback(e => { touchX.current = e.touches[0].clientX; }, []);
+  const onTouchEnd   = useCallback(e => {
+    if (locked || touchX.current == null) return;
+    const dx = Math.abs(e.changedTouches[0].clientX - touchX.current);
+    if (dx > 10) return; // was a swipe, not a tap
+    const x = e.changedTouches[0].clientX;
     const w = window.innerWidth;
-    const JUMP = 120;
-    if (x < w * 0.3) {
-      vibrate(15);
-      setScrollY(p => Math.max(0, p - JUMP));
-    } else if (x > w * 0.7) {
-      vibrate(15);
-      setScrollY(p => p + JUMP);
-    }
+    const JUMP = 100;
+    if (x < w * 0.28)      { vibrate(12); setPos(p => Math.max(0, p - JUMP)); }
+    else if (x > w * 0.72) { vibrate(12); setPos(p => p + JUMP); }
+    else                   { vibrate(8);  setPlaying(p => !p); }
+    touchX.current = null;
   }, [locked]);
 
-  function startSinging(song) {
-    setActiveSong(song);
-    setScrollY(0);
-    setPlaying(false);
-    setLocked(false);
-    setView("sing");
+  // ── Actions ──
+  function sing(song) {
+    setActive(song); setPos(0); setPlaying(false); setLocked(false); setView("sing");
   }
-
-  function stopSinging() {
-    setPlaying(false);
+  function stopSing() {
     cancelAnimationFrame(rafRef.current);
-    setView("library");
-    setActiveSong(null);
-    setScrollY(0);
-    setLocked(false);
+    setPlaying(false); setActive(null); setPos(0); setLocked(false); setView("lib");
   }
-
   function openEdit(song = null) {
-    if (song) {
-      setForm({ title: song.title, artist: song.artist || "", lyrics: song.lyrics, speed: song.speed ?? 45, fontSize: song.fontSize ?? 26 });
-      setEditSong(song);
-    } else {
-      setForm({ title: "", artist: "", lyrics: "", speed: 45, fontSize: 26 });
-      setEditSong(null);
-    }
+    setForm(song ? { title: song.title, artist: song.artist || "", lyrics: song.lyrics, speed: song.speed ?? 40, fontSize: song.fontSize ?? 24 } : emptyForm());
+    setEditTarget(song);
     setView("edit");
   }
-
   function saveForm() {
     if (!form.title.trim() || !form.lyrics.trim()) return;
-    if (editSong) {
-      setSongs(s => s.map(x => x.id === editSong.id ? { ...x, ...form } : x));
-    } else {
-      setSongs(s => [{ id: Date.now().toString(), ...form }, ...s]);
-    }
-    setView("library");
+    if (editTarget) setSongs(s => s.map(x => x.id === editTarget.id ? { ...x, ...form } : x));
+    else            setSongs(s => [{ id: Date.now().toString(), ...form }, ...s]);
+    setView("lib");
+  }
+  function doDelete(id) { setSongs(s => s.filter(x => x.id !== id)); setDelId(null); }
+  function updateSpeed(v) {
+    const s = Number(v);
+    setActive(a => ({ ...a, speed: s }));
+    setSongs(list => list.map(x => x.id === active.id ? { ...x, speed: s } : x));
+  }
+  function paste(field) {
+    navigator.clipboard?.readText?.().then(t => { if (t) setForm(f => ({ ...f, [field]: t })); }).catch(() => {});
   }
 
-  function deleteSong(id) {
-    setSongs(s => s.filter(x => x.id !== id));
-    setConfirmDelete(null);
-  }
-
-  function pasteFromClipboard(field) {
-    navigator.clipboard?.readText?.().then(text => {
-      if (text) setForm(f => ({ ...f, [field]: text }));
-    }).catch(() => {});
-  }
-
-  const theme = darkMode ? dark : light;
   const filtered = songs.filter(s =>
     s.title.toLowerCase().includes(search.toLowerCase()) ||
     (s.artist || "").toLowerCase().includes(search.toLowerCase())
   );
 
-  // ─── SING VIEW ─────────────────────────────────────────────────────────────
-  if (view === "sing" && activeSong) {
+  // ════════════════════════════════════════════════════════════════════════════
+  // SING VIEW
+  // ════════════════════════════════════════════════════════════════════════════
+  if (view === "sing" && active) {
     return (
-      <div style={{ position: "fixed", inset: 0, background: "#07090e", display: "flex", flexDirection: "column", fontFamily: "'Georgia', serif", touchAction: "none" }}>
-        {/* Top bar */}
-        {!locked && (
-          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", paddingTop: "max(10px, env(safe-area-inset-top))", background: "rgba(0,0,0,0.6)", backdropFilter: "blur(12px)", flexShrink: 0, zIndex: 10 }}>
-            <button onClick={stopSinging} style={pill("#1c1f28", "#aaa")}>← Retour</button>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ color: "#fff", fontWeight: 700, fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{activeSong.title}</div>
-              {activeSong.artist && <div style={{ color: "#666", fontSize: 11 }}>{activeSong.artist}</div>}
-            </div>
-            {/* Speed */}
-            <input type="range" min={8} max={140} value={activeSong.speed ?? 45}
-              onChange={e => {
-                const s = Number(e.target.value);
-                setActiveSong(a => ({ ...a, speed: s }));
-                setSongs(songs => songs.map(x => x.id === activeSong.id ? { ...x, speed: s } : x));
-              }}
-              style={{ width: 64, accentColor: "#e8c97a" }}
-            />
-            <button onClick={() => { vibrate(10); setPlaying(p => !p); }}
-              style={{ ...pill(playing ? "#e8c97a" : "#2a2d36", playing ? "#000" : "#fff"), fontWeight: 700, fontSize: 18, width: 44, height: 44, borderRadius: 22, padding: 0, flexShrink: 0 }}>
-              {playing ? "⏸" : "▶"}
-            </button>
-            <button onClick={() => { setScrollY(0); setPlaying(false); }} style={pill("#1c1f28", "#aaa")}>↺</button>
-            <button onClick={() => { vibrate(20); setLocked(true); }} style={pill("#1c1f28", "#e8c97a")} title="Verrouiller">🔒</button>
-          </div>
-        )}
+      <div style={S.singWrap}>
 
-        {/* Locked overlay bar */}
-        {locked && (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", paddingTop: "max(10px, env(safe-area-inset-top))", background: "rgba(0,0,0,0.8)", flexShrink: 0, zIndex: 10 }}>
-            <span style={{ color: "#555", fontSize: 12 }}>🔒 Écran verrouillé</span>
-            <div style={{ display: "flex", gap: 10 }}>
-              <button onClick={() => { vibrate(10); setPlaying(p => !p); }}
-                style={{ ...pill(playing ? "#e8c97a" : "#2a2d36", playing ? "#000" : "#fff"), fontWeight: 700, fontSize: 18, width: 44, height: 44, borderRadius: 22, padding: 0 }}>
-                {playing ? "⏸" : "▶"}
-              </button>
-              <button onClick={() => { vibrate(20); setLocked(false); }} style={pill("#2a2d36", "#e8c97a")}>🔓 Déverrouiller</button>
-            </div>
-          </div>
-        )}
+        {/* ── Top bar ── */}
+        <div style={S.singBar}>
+          {!locked ? (
+            <>
+              <Btn onClick={stopSing} style={S.iconBtn}>✕</Btn>
+              <div style={{ flex: 1, minWidth: 0, padding: "0 4px" }}>
+                <div style={S.singTitle}>{active.title}</div>
+                {active.artist ? <div style={S.singArtist}>{active.artist}</div> : null}
+              </div>
+              <input type="range" min={8} max={130} value={active.speed ?? 40}
+                onChange={e => updateSpeed(e.target.value)}
+                style={S.slider} />
+              <Btn onClick={() => { vibrate(8); setPlaying(p => !p); }} style={{ ...S.playBtn, background: playing ? GOLD : "#232630" }}>
+                <span style={{ color: playing ? "#000" : "#fff", fontSize: 20 }}>{playing ? "⏸" : "▶"}</span>
+              </Btn>
+              <Btn onClick={() => { setPos(0); setPlaying(false); }} style={S.iconBtn}>↺</Btn>
+              <Btn onClick={() => { vibrate(20); setLocked(true); }} style={S.iconBtn}>🔒</Btn>
+            </>
+          ) : (
+            <>
+              <span style={{ color: "#444", fontSize: 12, flex: 1 }}>🔒 Verrouillé</span>
+              <Btn onClick={() => { vibrate(8); setPlaying(p => !p); }} style={{ ...S.playBtn, background: playing ? GOLD : "#232630" }}>
+                <span style={{ color: playing ? "#000" : "#fff", fontSize: 20 }}>{playing ? "⏸" : "▶"}</span>
+              </Btn>
+              <Btn onClick={() => { vibrate(20); setLocked(false); }} style={{ ...S.iconBtn, color: GOLD }}>🔓</Btn>
+            </>
+          )}
+        </div>
 
-        {/* Lyrics */}
-        <div ref={containerRef} style={{ flex: 1, overflow: "hidden", position: "relative" }} onTouchEnd={handleSingTap}>
-          <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 80, background: "linear-gradient(to bottom, #07090e, transparent)", zIndex: 2, pointerEvents: "none" }} />
-          <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 120, background: "linear-gradient(to top, #07090e, transparent)", zIndex: 2, pointerEvents: "none" }} />
+        {/* ── Lyrics area ── */}
+        <div
+          ref={scrollRef}
+          style={S.lyricsScroll}
+          onTouchStart={onTouchStart}
+          onTouchEnd={onTouchEnd}
+        >
+          {/* Fade top/bottom */}
+          <div style={S.fadeTop} />
+          <div style={S.fadeBot} />
 
           {/* Tap zones hint */}
-          {!playing && scrollY === 0 && !locked && (
-            <div style={{ position: "absolute", bottom: 40, left: 0, right: 0, zIndex: 3, display: "flex", justifyContent: "space-between", padding: "0 20px", pointerEvents: "none" }}>
-              <div style={{ color: "#333", fontSize: 11, textAlign: "center" }}>◀ tap<br/>reculer</div>
-              <div style={{ color: "#444", fontSize: 11, textAlign: "center", animation: "pulse 2s infinite" }}>Appuie sur ▶<br/>pour commencer</div>
-              <div style={{ color: "#333", fontSize: 11, textAlign: "center" }}>tap ▶<br/>avancer</div>
+          {!playing && pos === 0 && (
+            <div style={S.tapHint}>
+              <span style={{ opacity: 0.3, fontSize: 11 }}>◀ reculer</span>
+              <span style={{ opacity: 0.5, fontSize: 11, animation: "pulse 2s infinite" }}>● pause</span>
+              <span style={{ opacity: 0.3, fontSize: 11 }}>avancer ▶</span>
             </div>
           )}
 
-          <div ref={contentRef} style={{ padding: "60px 24px 160px" }}>
-            {activeSong.lyrics.split("\n").map((line, i) => {
+          <div ref={innerRef} style={S.lyricsInner}>
+            {active.lyrics.split("\n").map((line, i) => {
               const blank = line.trim() === "";
               return (
                 <div key={i} style={{
-                  fontSize: blank ? 10 : (activeSong.fontSize ?? 26),
-                  lineHeight: blank ? "32px" : "1.6",
-                  color: blank ? "transparent" : "#f0e8d0",
-                  textAlign: "center",
-                  maxWidth: 560,
-                  margin: "0 auto",
-                  padding: blank ? "6px 0" : "1px 0",
+                  fontSize:   blank ? 0   : (active.fontSize ?? 24),
+                  height:     blank ? 28  : "auto",
+                  lineHeight: blank ? "28px" : 1.65,
+                  color:      "#f0e8d0",
+                  textAlign:  "center",
+                  padding:    blank ? 0 : "1px 20px",
                   letterSpacing: "0.01em",
-                }}>
-                  {blank ? "·" : line}
-                </div>
+                  maxWidth: 580,
+                  margin: "0 auto",
+                }}>{blank ? "" : line}</div>
               );
             })}
-            <div style={{ height: 100 }} />
+            <div style={{ height: 140 }} />
           </div>
         </div>
-        <style>{`@keyframes pulse{0%,100%{opacity:.3}50%{opacity:.8}}`}</style>
+
+        <style>{`
+          @keyframes pulse { 0%,100%{opacity:.2} 50%{opacity:.7} }
+          * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
+          html, body { overscroll-behavior: none; overflow: hidden; height: 100%; position: fixed; width: 100%; }
+        `}</style>
       </div>
     );
   }
 
-  // ─── EDIT VIEW ─────────────────────────────────────────────────────────────
+  // ════════════════════════════════════════════════════════════════════════════
+  // EDIT VIEW
+  // ════════════════════════════════════════════════════════════════════════════
   if (view === "edit") {
-    const valid = form.title.trim() && form.lyrics.trim();
+    const ok = form.title.trim() && form.lyrics.trim();
     return (
-      <div style={{ minHeight: "100vh", background: theme.bg, color: theme.text, fontFamily: "'Georgia', serif", paddingBottom: 40 }}>
-        <div style={{ padding: "16px 16px 0", paddingTop: "max(16px, env(safe-area-inset-top))" }}>
-          <button onClick={() => setView("library")} style={pill(theme.card, theme.muted)}>← Annuler</button>
+      <div style={S.page}>
+        <style>{`* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; } html,body{overscroll-behavior:none;}`}</style>
+
+        {/* Header */}
+        <div style={S.editHeader}>
+          <Btn onClick={() => setView("lib")} style={S.backBtn}>← Retour</Btn>
+          <span style={S.pageTitle}>{editTarget ? "Modifier" : "Nouvelle chanson"}</span>
         </div>
-        <div style={{ padding: "16px 16px 0" }}>
-          <h2 style={{ margin: "0 0 20px", fontSize: 22, fontWeight: 700, color: theme.heading }}>
-            {editSong ? "Modifier" : "Nouvelle chanson"}
-          </h2>
 
-          <label style={lbl(theme)}>Titre *</label>
-          <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder="Ex : Bohemian Rhapsody" style={inp(theme)} />
+        <div style={S.editBody}>
+          {/* Titre */}
+          <label style={S.label}>Titre *</label>
+          <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+            placeholder="Ex : Bohemian Rhapsody" style={S.input} />
 
-          <label style={lbl(theme)}>Artiste</label>
+          {/* Artiste */}
+          <label style={S.label}>Artiste</label>
+          <input value={form.artist} onChange={e => setForm(f => ({ ...f, artist: e.target.value }))}
+            placeholder="Ex : Queen" style={S.input} />
+
+          {/* Paroles */}
+          <label style={S.label}>Paroles *</label>
           <div style={{ position: "relative" }}>
-            <input value={form.artist} onChange={e => setForm(f => ({ ...f, artist: e.target.value }))} placeholder="Ex : Queen" style={inp(theme)} />
+            <textarea value={form.lyrics} onChange={e => setForm(f => ({ ...f, lyrics: e.target.value }))}
+              placeholder={"Colle les paroles ici...\n\nLaisse une ligne vide entre les strophes."}
+              rows={12} style={{ ...S.input, resize: "none", fontFamily: "monospace", fontSize: 14, lineHeight: 1.6, paddingTop: 44 }} />
+            <Btn onClick={() => paste("lyrics")} style={S.pasteBtn}>📋 Coller depuis le presse-papier</Btn>
           </div>
 
-          <label style={lbl(theme)}>Paroles *</label>
-          <div style={{ position: "relative" }}>
-            <textarea
-              value={form.lyrics}
-              onChange={e => setForm(f => ({ ...f, lyrics: e.target.value }))}
-              placeholder={"Collez les paroles ici...\n\nLaissez une ligne vide entre les strophes."}
-              rows={14}
-              style={{ ...inp(theme), resize: "none", fontFamily: "monospace", fontSize: 14, lineHeight: 1.6 }}
-            />
-            <button
-              onClick={() => pasteFromClipboard("lyrics")}
-              style={{ position: "absolute", top: 10, right: 10, ...pill("#e8c97a", "#000"), fontSize: 12, fontWeight: 700 }}
-            >
-              📋 Coller
-            </button>
+          {/* Vitesse */}
+          <label style={S.label}>Vitesse de défilement</label>
+          <div style={S.sliderRow}>
+            <span style={S.sliderEmoji}>🐢</span>
+            <input type="range" min={8} max={130} value={form.speed}
+              onChange={e => setForm(f => ({ ...f, speed: Number(e.target.value) }))} style={S.sliderFull} />
+            <span style={S.sliderEmoji}>🐇</span>
           </div>
 
-          {/* Speed per song */}
-          <label style={lbl(theme)}>Vitesse par défaut</label>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-            <span style={{ color: theme.muted, fontSize: 18 }}>🐢</span>
-            <input type="range" min={8} max={140} value={form.speed} onChange={e => setForm(f => ({ ...f, speed: Number(e.target.value) }))} style={{ flex: 1, accentColor: "#e8c97a" }} />
-            <span style={{ color: theme.muted, fontSize: 18 }}>🐇</span>
+          {/* Taille police */}
+          <label style={S.label}>Taille du texte — aperçu : <span style={{ color: GOLD, fontSize: form.fontSize * 0.5 + 10 }}>Aa</span></label>
+          <div style={S.sliderRow}>
+            <span style={{ ...S.sliderEmoji, fontSize: 14 }}>A</span>
+            <input type="range" min={16} max={40} value={form.fontSize}
+              onChange={e => setForm(f => ({ ...f, fontSize: Number(e.target.value) }))} style={S.sliderFull} />
+            <span style={{ ...S.sliderEmoji, fontSize: 24 }}>A</span>
           </div>
 
-          {/* Font size */}
-          <label style={lbl(theme)}>Taille du texte</label>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
-            <span style={{ color: theme.muted, fontSize: 13 }}>A</span>
-            <input type="range" min={16} max={42} value={form.fontSize} onChange={e => setForm(f => ({ ...f, fontSize: Number(e.target.value) }))} style={{ flex: 1, accentColor: "#e8c97a" }} />
-            <span style={{ color: theme.muted, fontSize: 22 }}>A</span>
-            <span style={{ color: theme.accent, fontSize: 13, width: 28 }}>{form.fontSize}px</span>
-          </div>
-
-          <button onClick={saveForm} disabled={!valid} style={{
-            background: valid ? "#e8c97a" : theme.card,
-            color: valid ? "#000" : theme.muted,
-            border: "none", borderRadius: 12, padding: "16px", fontSize: 16, fontWeight: 700,
-            width: "100%", cursor: valid ? "pointer" : "not-allowed", fontFamily: "inherit",
-            opacity: valid ? 1 : 0.5,
+          {/* Save */}
+          <Btn onClick={saveForm} style={{
+            ...S.saveBtn,
+            background: ok ? GOLD : "#1e2128",
+            color: ok ? "#000" : "#555",
+            opacity: ok ? 1 : 0.6,
+            cursor: ok ? "pointer" : "default",
           }}>
-            {editSong ? "Enregistrer" : "Ajouter la chanson"}
-          </button>
+            {editTarget ? "💾 Enregistrer" : "➕ Ajouter la chanson"}
+          </Btn>
         </div>
       </div>
     );
   }
 
-  // ─── LIBRARY VIEW ──────────────────────────────────────────────────────────
+  // ════════════════════════════════════════════════════════════════════════════
+  // LIBRARY VIEW
+  // ════════════════════════════════════════════════════════════════════════════
   return (
-    <div style={{ minHeight: "100vh", background: theme.bg, color: theme.text, fontFamily: "'Georgia', serif" }}>
+    <div style={S.page}>
+      <style>{`* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; } html,body{overscroll-behavior:none;height:100%;}`}</style>
+
       {/* Header */}
-      <div style={{ padding: "0 16px 12px", paddingTop: "max(16px, env(safe-area-inset-top))", borderBottom: `1px solid ${theme.border}` }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-          <div>
-            <div style={{ fontSize: 10, letterSpacing: "0.2em", color: theme.accent, textTransform: "uppercase", marginBottom: 2 }}>🎤 Lyrics</div>
-            <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700, color: theme.heading }}>Ma bibliothèque</h1>
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={() => setDarkMode(d => !d)} style={pill(theme.card, theme.muted)}>{darkMode ? "☀️" : "🌙"}</button>
-            <button onClick={() => openEdit()} style={pill("#e8c97a", "#000", true)}>+ Nouvelle</button>
-          </div>
+      <div style={S.libHeader}>
+        <div>
+          <div style={S.appLabel}>🎤 LYRICS</div>
+          <div style={S.appTitle}>Ma bibliothèque</div>
         </div>
-        {/* Search */}
-        <div style={{ position: "relative" }}>
-          <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: theme.muted, fontSize: 14 }}>🔍</span>
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Rechercher..."
-            style={{ ...inp(theme), paddingLeft: 36, marginBottom: 0 }}
-          />
-          {search && (
-            <button onClick={() => setSearch("")} style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: theme.muted, fontSize: 18, cursor: "pointer" }}>×</button>
-          )}
-        </div>
+        <Btn onClick={() => openEdit()} style={S.addBtn}>+ Nouvelle</Btn>
+      </div>
+
+      {/* Search */}
+      <div style={S.searchWrap}>
+        <span style={S.searchIcon}>🔍</span>
+        <input value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="Rechercher une chanson..." style={S.searchInput} />
+        {search ? <Btn onClick={() => setSearch("")} style={S.clearBtn}>✕</Btn> : null}
       </div>
 
       {/* List */}
-      <div style={{ padding: "12px 16px 100px" }}>
+      <div style={S.list}>
         {filtered.length === 0 && (
-          <div style={{ textAlign: "center", color: theme.muted, padding: "60px 20px" }}>
-            <div style={{ fontSize: 44, marginBottom: 12 }}>🎵</div>
-            <div style={{ fontSize: 15 }}>{search ? "Aucun résultat" : "Aucune chanson.\nAppuie sur + pour commencer."}</div>
+          <div style={S.empty}>
+            <div style={{ fontSize: 48, marginBottom: 12 }}>🎵</div>
+            <div style={{ color: "#555", fontSize: 15 }}>
+              {search ? "Aucun résultat" : "Aucune chanson.\nAppuie sur + pour en ajouter."}
+            </div>
           </div>
         )}
-        {filtered.map((song, idx) => (
-          <SongCard
+        {filtered.map(song => (
+          <SongRow
             key={song.id}
             song={song}
-            theme={theme}
-            onSing={() => { vibrate(10); startSinging(song); }}
+            onSing={() => sing(song)}
             onEdit={() => openEdit(song)}
-            onDelete={() => setConfirmDelete(song.id)}
-            style={{ animationDelay: `${idx * 40}ms` }}
+            onDelete={() => setDelId(song.id)}
           />
         ))}
+        <div style={{ height: 40 }} />
       </div>
 
-      {/* Delete confirm */}
-      {confirmDelete && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", display: "flex", alignItems: "flex-end", zIndex: 100 }} onClick={() => setConfirmDelete(null)}>
-          <div style={{ background: theme.card, borderRadius: "20px 20px 0 0", padding: "28px 20px", paddingBottom: "max(28px, env(safe-area-inset-bottom))", width: "100%", textAlign: "center" }} onClick={e => e.stopPropagation()}>
+      {/* Delete sheet */}
+      {delId && (
+        <div style={S.overlay} onClick={() => setDelId(null)}>
+          <div style={S.sheet} onClick={e => e.stopPropagation()}>
             <div style={{ fontSize: 28, marginBottom: 8 }}>🗑️</div>
-            <div style={{ fontWeight: 700, fontSize: 17, color: theme.heading, marginBottom: 6 }}>Supprimer cette chanson ?</div>
-            <div style={{ color: theme.muted, fontSize: 14, marginBottom: 24 }}>Cette action est irréversible.</div>
-            <div style={{ display: "flex", gap: 10 }}>
-              <button onClick={() => setConfirmDelete(null)} style={{ ...pill(theme.bg, theme.text), flex: 1, padding: "14px", fontSize: 15 }}>Annuler</button>
-              <button onClick={() => { vibrate(20); deleteSong(confirmDelete); }} style={{ ...pill("#c0504d", "#fff", true), flex: 1, padding: "14px", fontSize: 15 }}>Supprimer</button>
-            </div>
+            <div style={S.sheetTitle}>Supprimer cette chanson ?</div>
+            <div style={S.sheetSub}>Cette action est irréversible.</div>
+            <Btn onClick={() => { vibrate(20); doDelete(delId); }} style={S.delConfirm}>Supprimer</Btn>
+            <Btn onClick={() => setDelId(null)} style={S.delCancel}>Annuler</Btn>
           </div>
         </div>
       )}
@@ -408,66 +366,196 @@ export default function App() {
   );
 }
 
-function SongCard({ song, theme, onSing, onEdit, onDelete }) {
-  const [swiped, setSwiped] = useState(false);
-  const startX = useRef(null);
+// ─── Song row with swipe-to-delete ───────────────────────────────────────────
+function SongRow({ song, onSing, onEdit, onDelete }) {
+  const [dx, setDx]   = useState(0);
+  const startX        = useRef(null);
+  const THRESHOLD     = 60;
 
-  function onTouchStart(e) { startX.current = e.touches[0].clientX; }
-  function onTouchEnd(e) {
+  function ts(e) { startX.current = e.touches[0].clientX; }
+  function tm(e) {
     if (startX.current == null) return;
-    const dx = e.changedTouches[0].clientX - startX.current;
-    if (dx < -60) setSwiped(true);
-    else if (dx > 30) setSwiped(false);
+    const d = e.touches[0].clientX - startX.current;
+    if (d < 0) setDx(Math.max(d, -80));
+    else        setDx(Math.min(d, 0));
+  }
+  function te() {
+    if (dx < -THRESHOLD) setDx(-80); else setDx(0);
     startX.current = null;
   }
 
   return (
-    <div style={{ position: "relative", marginBottom: 10, overflow: "hidden", borderRadius: 14 }} onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
-      {/* Delete action behind */}
-      <div style={{ position: "absolute", right: 0, top: 0, bottom: 0, background: "#c0504d", display: "flex", alignItems: "center", padding: "0 20px", borderRadius: 14 }}>
-        <button onClick={onDelete} style={{ background: "none", border: "none", color: "#fff", fontSize: 22, cursor: "pointer" }}>🗑</button>
+    <div style={{ position: "relative", marginBottom: 10, borderRadius: 14, overflow: "hidden" }}>
+      {/* Delete behind */}
+      <div style={S.rowDelete}>
+        <Btn onClick={onDelete} style={S.rowDeleteBtn}>🗑️</Btn>
       </div>
       {/* Card */}
-      <div style={{
-        background: theme.card,
-        border: `1px solid ${theme.border}`,
-        borderRadius: 14,
-        padding: "14px 14px",
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        transform: swiped ? "translateX(-70px)" : "translateX(0)",
-        transition: "transform 0.25s ease",
-        position: "relative",
-      }}>
+      <div
+        style={{ ...S.row, transform: `translateX(${dx}px)`, transition: dx === 0 || dx === -80 ? "transform .25s ease" : "none" }}
+        onTouchStart={ts} onTouchMove={tm} onTouchEnd={te}
+      >
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 600, fontSize: 15, color: theme.heading, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{song.title}</div>
-          <div style={{ fontSize: 12, color: theme.muted, marginTop: 2 }}>{song.artist || <span style={{ fontStyle: "italic" }}>Artiste inconnu</span>} · {song.lyrics.split("\n").filter(l => l.trim()).length} lignes</div>
+          <div style={S.rowTitle}>{song.title}</div>
+          <div style={S.rowSub}>
+            {song.artist || <em style={{ opacity: 0.5 }}>Artiste inconnu</em>}
+            <span style={{ color: "#3a3d48", margin: "0 5px" }}>·</span>
+            <span style={{ color: "#444" }}>{song.lyrics.split("\n").filter(l => l.trim()).length} lignes</span>
+          </div>
         </div>
-        <button onClick={onEdit} style={pill(theme.bg, theme.muted)}>✏️</button>
-        <button onClick={onSing} style={{ ...pill("#e8c97a", "#000"), fontWeight: 700, fontSize: 15 }}>▶ Chanter</button>
+        <Btn onClick={onEdit}  style={S.editBtn}>✏️</Btn>
+        <Btn onClick={onSing}  style={S.singBtn}>▶ Chanter</Btn>
       </div>
     </div>
   );
 }
 
-// ─── Themes ──────────────────────────────────────────────────────────────────
-const dark = {
-  bg: "#0d0f14", card: "#161920", border: "rgba(255,255,255,0.07)",
-  text: "#e0d8c8", heading: "#f0e8d0", muted: "#666", accent: "#e8c97a",
-};
-const light = {
-  bg: "#f5f0e8", card: "#fff", border: "rgba(0,0,0,0.08)",
-  text: "#2a2520", heading: "#1a1510", muted: "#999", accent: "#b8860b",
-};
+// ─── Tiny button wrapper ──────────────────────────────────────────────────────
+function Btn({ onClick, style, children }) {
+  return (
+    <button onClick={onClick} style={{ border: "none", cursor: "pointer", fontFamily: "inherit", WebkitTapHighlightColor: "transparent", ...style }}>
+      {children}
+    </button>
+  );
+}
 
-// ─── Shared styles ───────────────────────────────────────────────────────────
-function pill(bg, color, bold = false) {
-  return { background: bg, color, border: "none", borderRadius: 20, padding: "8px 14px", fontSize: 13, fontWeight: bold ? 700 : 500, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap", WebkitTapHighlightColor: "transparent" };
-}
-function lbl(t) {
-  return { display: "block", fontSize: 11, letterSpacing: "0.12em", textTransform: "uppercase", color: t.muted, marginBottom: 6, marginTop: 16 };
-}
-function inp(t) {
-  return { width: "100%", background: t.card, border: `1px solid ${t.border}`, borderRadius: 10, padding: "12px 14px", color: t.text, fontSize: 15, fontFamily: "inherit", outline: "none", boxSizing: "border-box", marginBottom: 4 };
-}
+function emptyForm() { return { title: "", artist: "", lyrics: "", speed: 40, fontSize: 24 }; }
+function vibrate(ms) { try { navigator.vibrate?.(ms); } catch {} }
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+const GOLD = "#e8c97a";
+const BG   = "#0d0f14";
+const CARD = "#13161d";
+const BORDER = "rgba(255,255,255,0.07)";
+const TEXT   = "#e0d8c8";
+const MUTED  = "#555";
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
+const S = {
+  // Shared
+  page: {
+    minHeight: "100dvh",
+    background: BG,
+    color: TEXT,
+    fontFamily: "'Georgia', serif",
+    display: "flex",
+    flexDirection: "column",
+  },
+
+  // Library
+  libHeader: {
+    display: "flex", alignItems: "flex-end", justifyContent: "space-between",
+    padding: "0 16px 14px",
+    paddingTop: "max(20px, env(safe-area-inset-top))",
+    borderBottom: `1px solid ${BORDER}`,
+    background: BG,
+    flexShrink: 0,
+  },
+  appLabel: { fontSize: 10, letterSpacing: "0.22em", color: GOLD, textTransform: "uppercase", marginBottom: 3 },
+  appTitle: { fontSize: 26, fontWeight: 700, color: "#f0e8d0", lineHeight: 1 },
+  addBtn:   { background: GOLD, color: "#000", borderRadius: 22, padding: "10px 18px", fontSize: 15, fontWeight: 700 },
+
+  searchWrap: {
+    display: "flex", alignItems: "center",
+    margin: "12px 16px 0",
+    background: CARD,
+    borderRadius: 12,
+    border: `1px solid ${BORDER}`,
+    overflow: "hidden",
+    flexShrink: 0,
+  },
+  searchIcon:  { padding: "0 10px 0 14px", color: MUTED, fontSize: 15, flexShrink: 0 },
+  searchInput: { flex: 1, background: "transparent", border: "none", outline: "none", color: TEXT, fontSize: 15, padding: "13px 0", fontFamily: "inherit" },
+  clearBtn:    { background: "transparent", color: MUTED, borderRadius: 0, padding: "10px 14px", fontSize: 18 },
+
+  list: { flex: 1, overflowY: "auto", padding: "12px 16px 0", WebkitOverflowScrolling: "touch" },
+  empty: { textAlign: "center", padding: "60px 20px", whiteSpace: "pre-line" },
+
+  row: {
+    background: CARD,
+    border: `1px solid ${BORDER}`,
+    borderRadius: 14,
+    padding: "13px 12px",
+    display: "flex", alignItems: "center", gap: 8,
+    position: "relative", zIndex: 1,
+    willChange: "transform",
+  },
+  rowTitle: { fontSize: 15, fontWeight: 600, color: "#f0e8d0", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  rowSub:   { fontSize: 12, color: "#666", marginTop: 2 },
+  rowDelete: { position: "absolute", right: 0, top: 0, bottom: 0, background: "#c0504d", borderRadius: 14, display: "flex", alignItems: "center", justifyContent: "flex-end", paddingRight: 16, minWidth: 80 },
+  rowDeleteBtn: { background: "transparent", color: "#fff", fontSize: 22, padding: "8px" },
+  editBtn: { background: "#1c2030", color: MUTED, borderRadius: 10, padding: "8px 10px", fontSize: 15, flexShrink: 0 },
+  singBtn: { background: GOLD, color: "#000", borderRadius: 22, padding: "9px 14px", fontSize: 14, fontWeight: 700, flexShrink: 0 },
+
+  // Delete sheet
+  overlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "flex-end", zIndex: 200 },
+  sheet: {
+    background: "#181b24", borderRadius: "20px 20px 0 0",
+    padding: "28px 20px",
+    paddingBottom: "max(28px, env(safe-area-inset-bottom))",
+    width: "100%", textAlign: "center",
+  },
+  sheetTitle:  { fontWeight: 700, fontSize: 18, color: "#f0e8d0", marginBottom: 6 },
+  sheetSub:    { color: MUTED, fontSize: 14, marginBottom: 24 },
+  delConfirm:  { display: "block", width: "100%", background: "#c0504d", color: "#fff", borderRadius: 14, padding: "15px", fontSize: 16, fontWeight: 700, marginBottom: 10 },
+  delCancel:   { display: "block", width: "100%", background: "#1c2030", color: TEXT, borderRadius: 14, padding: "15px", fontSize: 16 },
+
+  // Edit
+  editHeader: {
+    display: "flex", alignItems: "center", gap: 12,
+    padding: "0 16px 14px",
+    paddingTop: "max(16px, env(safe-area-inset-top))",
+    borderBottom: `1px solid ${BORDER}`,
+    background: BG,
+    flexShrink: 0,
+  },
+  backBtn:   { background: "#1c2030", color: MUTED, borderRadius: 10, padding: "9px 14px", fontSize: 14 },
+  pageTitle: { fontSize: 18, fontWeight: 700, color: "#f0e8d0" },
+  editBody:  { flex: 1, overflowY: "auto", padding: "8px 16px", paddingBottom: "max(24px, env(safe-area-inset-bottom))", WebkitOverflowScrolling: "touch" },
+  label:     { display: "block", fontSize: 11, letterSpacing: "0.12em", textTransform: "uppercase", color: MUTED, marginBottom: 6, marginTop: 18 },
+  input:     { width: "100%", background: CARD, border: `1px solid ${BORDER}`, borderRadius: 12, padding: "13px 14px", color: TEXT, fontSize: 15, fontFamily: "inherit", outline: "none", display: "block" },
+  pasteBtn:  { position: "absolute", top: 10, right: 10, background: GOLD, color: "#000", borderRadius: 10, padding: "6px 10px", fontSize: 12, fontWeight: 700 },
+  sliderRow: { display: "flex", alignItems: "center", gap: 10, margin: "6px 0 4px" },
+  sliderEmoji: { fontSize: 20, flexShrink: 0 },
+  sliderFull:  { flex: 1, accentColor: GOLD },
+  saveBtn:   { display: "block", width: "100%", borderRadius: 14, padding: "16px", fontSize: 16, fontWeight: 700, marginTop: 28, marginBottom: 8 },
+
+  // Sing
+  singWrap: {
+    position: "fixed", inset: 0,
+    background: "#07090e",
+    display: "flex", flexDirection: "column",
+    fontFamily: "'Georgia', serif",
+    touchAction: "none",
+  },
+  singBar: {
+    display: "flex", alignItems: "center", gap: 8,
+    padding: "8px 12px",
+    paddingTop: "max(10px, env(safe-area-inset-top))",
+    background: "rgba(10,12,18,0.9)",
+    backdropFilter: "blur(16px)",
+    borderBottom: `1px solid ${BORDER}`,
+    flexShrink: 0,
+    zIndex: 10,
+    minHeight: 56,
+  },
+  iconBtn:   { background: "#1c2030", color: "#aaa", borderRadius: 10, padding: "9px 12px", fontSize: 15, flexShrink: 0 },
+  playBtn:   { borderRadius: 24, width: 46, height: 46, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  singTitle: { fontSize: 13, fontWeight: 700, color: "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
+  singArtist: { fontSize: 11, color: "#555", marginTop: 1 },
+  slider:    { width: 60, accentColor: GOLD, flexShrink: 0 },
+
+  lyricsScroll: {
+    flex: 1, overflow: "hidden", position: "relative",
+    touchAction: "none",
+  },
+  lyricsInner: { padding: "70px 0 160px" },
+  fadeTop: { position: "absolute", top: 0, left: 0, right: 0, height: 70, background: "linear-gradient(to bottom, #07090e 30%, transparent)", zIndex: 2, pointerEvents: "none" },
+  fadeBot: { position: "absolute", bottom: 0, left: 0, right: 0, height: 130, background: "linear-gradient(to top, #07090e 40%, transparent)", zIndex: 2, pointerEvents: "none" },
+  tapHint: {
+    position: "absolute", bottom: 50, left: 0, right: 0, zIndex: 3,
+    display: "flex", justifyContent: "space-between", padding: "0 24px",
+    pointerEvents: "none",
+    color: "#fff",
+  },
+};
