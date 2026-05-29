@@ -56,7 +56,7 @@ function smoothScrollTo(el, target, duration = 300) {
 }
 
 // ─── YouTube Player hook ─────────────────────────────────────────────────────
-function useYouTubePlayer(videoId, onReady) {
+function useYouTubePlayer(videoId, onReady, onStateChange) {
   const playerRef = useRef(null);
   const divId = "yt-player";
 
@@ -67,9 +67,18 @@ function useYouTubePlayer(videoId, onReady) {
       if (playerRef.current) { playerRef.current.destroy(); playerRef.current = null; }
       playerRef.current = new window.YT.Player(divId, {
         videoId,
-        playerVars: { autoplay: 0, controls: 1, rel: 0, modestbranding: 1, playsinline: 1 },
+        playerVars: {
+          autoplay: 0,
+          controls: 1,
+          rel: 0,
+          modestbranding: 1,
+          playsinline: 1,
+          mute: 0,
+          origin: window.location.origin,
+        },
         events: {
-          onReady: () => onReady?.(playerRef.current),
+          onReady: (e) => onReady?.(e.target),
+          onStateChange: (e) => onStateChange?.(e.data),
           onError: () => {},
         },
       });
@@ -138,6 +147,11 @@ export default function App() {
       ytPlayerRef.current = player;
       usingYT.current = true;
       setYtReady(true);
+    },
+    (state) => {
+      // YT.PlayerState: PLAYING=1, PAUSED=2, ENDED=0
+      if (state === 1) setPlaying(true);
+      else if (state === 2 || state === 0) setPlaying(false);
     }
   );
 
@@ -235,14 +249,26 @@ export default function App() {
   function togglePlay() {
     vibrate(8);
     if (usingYT.current && ytPlayerRef.current) {
-      const state = ytPlayerRef.current.getPlayerState?.();
-      if (state === 1) ytPlayerRef.current.pauseVideo();
-      else ytPlayerRef.current.playVideo();
-      setPlaying(p => !p);
+      // MUST call playVideo/pauseVideo directly in user gesture handler for iOS
+      try {
+        const state = ytPlayerRef.current.getPlayerState?.();
+        if (state === 1) {
+          ytPlayerRef.current.pauseVideo();
+          setPlaying(false);
+          baseElapsed.current = elapsedRef.current;
+        } else {
+          ytPlayerRef.current.playVideo();
+          setPlaying(true);
+        }
+      } catch(e) {}
     } else {
-      if (!playing) startTsRef.current = performance.now() - baseElapsed.current * 1000;
-      else baseElapsed.current = elapsedRef.current;
-      setPlaying(p => !p);
+      if (!playing) {
+        startTsRef.current = performance.now() - baseElapsed.current * 1000;
+        setPlaying(true);
+      } else {
+        baseElapsed.current = elapsedRef.current;
+        setPlaying(false);
+      }
     }
   }
 
@@ -260,18 +286,23 @@ export default function App() {
     }
   }
 
-  // Tap on lyric line → seek to its timestamp
+  // Tap on lyric line → seek to its timestamp (direct call for iOS)
   function seekToLine(line) {
     vibrate(10);
     if (usingYT.current && ytPlayerRef.current) {
-      ytPlayerRef.current.seekTo(line.time, true);
-      if (!playing) { ytPlayerRef.current.playVideo(); setPlaying(true); }
+      try {
+        ytPlayerRef.current.seekTo(line.time, true);
+        ytPlayerRef.current.playVideo(); // always play after seek
+        setPlaying(true);
+        elapsedRef.current = line.time;
+        setElapsed(line.time);
+      } catch(e) {}
     } else {
       elapsedRef.current = line.time;
       baseElapsed.current = line.time;
       startTsRef.current = performance.now();
       setElapsed(line.time);
-      if (!playing) setPlaying(true);
+      setPlaying(true);
     }
   }
 
