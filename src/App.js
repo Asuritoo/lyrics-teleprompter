@@ -120,6 +120,7 @@ export default function App() {
   const [ytReady, setYtReady]     = useState(false);
   const [ytBlocked, setYtBlocked] = useState(false);
   const [showVideo, setShowVideo] = useState(true);
+  const [muted, setMuted]         = useState(false);
 
   // Search
   const [sq, setSq]               = useState({ title: "", artist: "" });
@@ -286,6 +287,16 @@ export default function App() {
     }
   }
 
+  function toggleMute() {
+    vibrate(8);
+    if (usingYT.current && ytPlayerRef.current) {
+      try {
+        if (muted) { ytPlayerRef.current.unMute(); setMuted(false); }
+        else { ytPlayerRef.current.mute(); setMuted(true); }
+      } catch(e) {}
+    }
+  }
+
   // Tap on lyric line → seek to its timestamp (direct call for iOS)
   function seekToLine(line) {
     vibrate(10);
@@ -392,6 +403,11 @@ export default function App() {
                   {showVideo ? "🎬" : "🎵"}
                 </Btn>
               )}
+              {hasYT && (
+                <Btn onClick={toggleMute} style={{ ...S.iconBtn, color: muted ? "#e07070" : "#aaa" }}>
+                  {muted ? "🔇" : "🔊"}
+                </Btn>
+              )}
               <Btn onClick={() => seek(-5)} style={S.iconBtn}>−5s</Btn>
               <Btn onClick={togglePlay} style={{ ...S.playBtn, background: playing ? GOLD : "#232630" }}>
                 <span style={{ color: playing ? "#000" : "#fff", fontSize: 22 }}>{playing ? "⏸" : "▶"}</span>
@@ -447,58 +463,84 @@ export default function App() {
           <div style={S.fadeTop} />
           <div style={S.fadeBot} />
           <div style={{ padding: "80px 16px 200px" }}>
-            {hasSynced ? lines.map((line, i) => {
-              const isCurrent = i === activeIdx;
-              const isPast    = i < activeIdx;
-              const isNext    = i === activeIdx + 1;
-
-              // Barre de progression entre lignes (pause > 1.5s)
-              const nextLine  = lines[i + 1];
-              const gap       = nextLine ? nextLine.time - line.time : 0;
-              const showBar   = gap > 1.5 && isCurrent && playing;
-              const barProgress = showBar
-                ? Math.min(1, (elapsed - line.time) / gap)
-                : 0;
+            {hasSynced ? (() => {
+              // Barre d'intro (avant la 1ère parole)
+              const introGap = lines[0]?.time ?? 0;
+              const introProgress = introGap > 1.5
+                ? Math.min(1, elapsed / introGap)
+                : 1;
+              const introIsCurrent = activeIdx === -1 || (activeIdx === 0 && elapsed < lines[0].time);
+              const introIsPast = elapsed >= (lines[0]?.time ?? 0);
 
               return (
-                <div key={i}>
-                  <div
-                    ref={el => lineRefs.current[i] = el}
-                    onClick={() => hasSynced && seekToLine(line)}
-                    style={{
-                      textAlign: "center",
-                      maxWidth: 580,
-                      margin: "0 auto",
-                      padding: "5px 8px",
-                      fontSize: isCurrent ? fontSize : isNext ? Math.round(fontSize * 0.85) : Math.round(fontSize * 0.68),
-                      fontWeight: isCurrent ? 700 : isNext ? 500 : 400,
-                      color: isCurrent ? GOLD : isPast ? "#222530" : isNext ? "#5a5e6a" : "#3a3e4a",
-                      transition: "font-size 0.2s ease, color 0.2s ease",
-                      willChange: "color, font-size",
-                      lineHeight: 1.5,
-                      letterSpacing: isCurrent ? "0.02em" : "normal",
-                      cursor: "pointer",
-                      WebkitTapHighlightColor: "transparent",
-                    }}
-                  >
-                    {line.text}
-                  </div>
-
-                  {/* Barre de progression pendant les pauses */}
-                  {gap > 1.5 && (
-                    <div style={{ margin: "8px auto", maxWidth: 200, height: 2, background: "#1a1d28", borderRadius: 2, overflow: "hidden" }}>
+                <>
+                  {/* Barre intro */}
+                  {introGap > 1.5 && (
+                    <div style={{ margin: "0 auto 16px", maxWidth: 240, height: 3, background: "#1a1d28", borderRadius: 3, overflow: "hidden" }}>
                       <div style={{
                         height: "100%",
-                        width: isCurrent && playing ? `${barProgress * 100}%` : isPast ? "100%" : "0%",
-                        background: isCurrent ? GOLD : "#2a2d38",
-                        transition: isCurrent ? "none" : "width 0s",
-                        borderRadius: 2,
+                        width: introIsPast ? "100%" : playing ? `${introProgress * 100}%` : `${introProgress * 100}%`,
+                        background: introIsPast ? "#2a2d38" : GOLD,
+                        borderRadius: 3,
+                        transition: "none",
                       }} />
                     </div>
                   )}
-                </div>
+
+                  {lines.map((line, i) => {
+                    const isCurrent = i === activeIdx;
+                    const isPast    = i < activeIdx;
+                    const isNext    = i === activeIdx + 1;
+
+                    // Gap jusqu'à la prochaine ligne
+                    const nextLine  = lines[i + 1];
+                    const gap       = nextLine ? nextLine.time - line.time : 0;
+                    const barProgress = (gap > 1.5 && isCurrent)
+                      ? Math.min(1, (elapsed - line.time) / gap)
+                      : 0;
+
+                    return (
+                      <div key={i}>
+                        <div
+                          ref={el => lineRefs.current[i] = el}
+                          onClick={() => seekToLine(line)}
+                          style={{
+                            textAlign: "center",
+                            maxWidth: 580,
+                            margin: "0 auto",
+                            padding: "5px 8px",
+                            fontSize: isCurrent ? fontSize : isNext ? Math.round(fontSize * 0.85) : Math.round(fontSize * 0.68),
+                            fontWeight: isCurrent ? 700 : isNext ? 500 : 400,
+                            color: isCurrent ? GOLD : isPast ? "#222530" : isNext ? "#5a5e6a" : "#3a3e4a",
+                            transition: "font-size 0.2s ease, color 0.2s ease",
+                            willChange: "color, font-size",
+                            lineHeight: 1.5,
+                            letterSpacing: isCurrent ? "0.02em" : "normal",
+                            cursor: "pointer",
+                            WebkitTapHighlightColor: "transparent",
+                          }}
+                        >
+                          {line.text}
+                        </div>
+
+                        {/* Barre de progression pendant les silences > 1.5s */}
+                        {gap > 1.5 && (
+                          <div style={{ margin: "10px auto", maxWidth: 240, height: 3, background: "#1a1d28", borderRadius: 3, overflow: "hidden" }}>
+                            <div style={{
+                              height: "100%",
+                              width: isPast ? "100%" : isCurrent ? `${barProgress * 100}%` : "0%",
+                              background: isPast ? "#2a2d38" : GOLD,
+                              borderRadius: 3,
+                              transition: "none",
+                            }} />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </>
               );
-            }) : (
+            })() : (
               active.lyrics?.split("\n").map((line, i) => (
                 <div key={i} style={{ textAlign: "center", fontSize, color: "#f0e8d0", padding: "3px 16px", lineHeight: 1.65, maxWidth: 560, margin: "0 auto" }}>
                   {line || <span style={{ opacity: 0 }}>·</span>}
