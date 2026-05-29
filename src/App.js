@@ -265,7 +265,7 @@ export default function App() {
     ytPlayerRef.current = null; usingYT.current = false;
     cancelAnimationFrame(rafRef.current); cancelAnimationFrame(syncRafRef.current);
     setPlaying(false); setActive(null); setElapsed(0); elapsedRef.current=0; baseElapsed.current=0;
-    setYtReady(false); setActiveIdx(-1);
+    setYtReady(false); setActiveIdx(-1); setLocked(false); setMuted(false);
     setView("lib");
   }
 
@@ -324,6 +324,7 @@ export default function App() {
     if (!form.title?.trim()||(!form.lyrics?.trim()&&!form.syncedLines)) return;
     if (editTarget) setSongs(s=>s.map(x=>x.id===editTarget.id?{...x,...form}:x));
     else setSongs(s=>[{id:Date.now().toString(),...form},...s]);
+    setEdit(null);
     setView("lib");
   }
 
@@ -515,7 +516,7 @@ export default function App() {
       <div style={S.page}>
         <style>{CSS}</style>
         <div style={S.subHeader}>
-          <Btn onClick={()=>setView("lib")} style={S.backBtn}>←</Btn>
+          <Btn onClick={()=>{setView("lib");setEdit(null);}} style={S.backBtn}>←</Btn>
           <span style={S.subTitle}>{editTarget?"Modifier":"Nouvelle chanson"}</span>
         </div>
         <div style={S.scrollBody}>
@@ -562,7 +563,7 @@ export default function App() {
   // ════════════════════════════════════════════════════════════════════════════
   // PLAYLIST DETAIL
   // ════════════════════════════════════════════════════════════════════════════
-  if (view === "playlist_detail" && activePlaylist) {
+  if (view === "playlist_detail" && activePlaylist && playlists.some(p=>p.id===activePlaylist.id)) {
     return (
       <div style={S.page}>
         <style>{CSS}</style>
@@ -675,7 +676,7 @@ export default function App() {
         </div>
         <label style={{...S.greenBtn,display:"block",textAlign:"center",cursor:"pointer"}}>
           📁 Choisir un fichier CSV
-          <input type="file" accept=".csv" style={{display:"none"}} onChange={e=>handleCSV(e.target.files&&e.target.files[0])}/>
+          <input type="file" accept=".csv" style={{display:"none"}} onChange={e=>{handleCSV(e.target.files&&e.target.files[0]);e.target.value="";}}/>
         </label>
       </div>
       {importProgress.active&&(
@@ -729,7 +730,7 @@ export default function App() {
           {id:"library",icon:"📚",label:"Bibliothèque"},
           {id:"import",icon:"➕",label:"Importer"},
         ].map(t=>(
-          <Btn key={t.id} onClick={()=>{setTab(t.id);if(t.id!=="search")setGlobalSearch("");}} style={{background:"transparent",display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"4px 0",flex:1}}>
+          <Btn key={t.id} onClick={()=>{setTab(t.id);if(t.id!=="search")setGlobalSearch("");setView("lib");setActivePlaylist(null);}} style={{background:"transparent",display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"4px 0",flex:1}}>
             <span style={{fontSize:20,opacity:tab===t.id?1:.4}}>{t.icon}</span>
             <span style={{fontSize:10,color:tab===t.id?"#fff":"#535353",fontWeight:tab===t.id?700:400}}>{t.label}</span>
           </Btn>
