@@ -761,13 +761,9 @@ export default function App() {
           {/* Étape 3 — Playlists */}
           {spotifyToken && (
             <div style={{ background:CARD, border:"1px solid " + BORDER, borderRadius:14, padding:16 }}>
-              <div style={{ fontSize:11, letterSpacing:"0.15em", color:GOLD, textTransform:"uppercase", marginBottom:10 }}>Étape 3 — Importer une playlist</div>
-              {spotifyLoading && <div style={{ color:MUTED, fontSize:14, textAlign:"center", padding:20 }}>Chargement des playlists...</div>}
-              {!spotifyLoading && spotifyPlaylists.length === 0 && (
-                <>
-                  <Btn onClick={loadSpotifyPlaylists} style={{ display:"block", width:"100%", background:"#1DB954", color:"#fff", borderRadius:12, padding:"13px", fontSize:15, fontWeight:700, marginBottom:10 }}>
-                    Charger mes playlists
-                  </Btn>
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:12 }}>
+                <div style={{ fontSize:11, letterSpacing:"0.15em", color:GOLD, textTransform:"uppercase" }}>Étape 3 — Importer</div>
+                <div style={{ display:"flex", gap:8 }}>
                   <Btn onClick={async () => {
                     const t = spotifyToken || getSpotifyToken();
                     if (!t) { alert("Pas de token"); return; }
@@ -776,15 +772,25 @@ export default function App() {
                       const d = await r.json();
                       const first = d.items && d.items[0];
                       if (first) {
-                        alert("Playlist: " + first.name + "\ntracks: " + JSON.stringify(first.tracks) + "\nkeys: " + Object.keys(first).join(", "));
+                        alert("DEBUG:\n" + JSON.stringify(first).slice(0, 400));
                       } else {
-                        alert("Réponse: " + JSON.stringify(d).slice(0, 300));
+                        alert("Réponse vide:\n" + JSON.stringify(d).slice(0, 300));
                       }
                     } catch(e) { alert("Erreur: " + e.message); }
-                  }} style={{ display:"block", width:"100%", background:"#1c2030", color:"#aaa", borderRadius:12, padding:"10px", fontSize:13 }}>
-                    🔍 Déboguer (voir données brutes)
+                  }} style={{ background:"#1c2030", color:"#aaa", borderRadius:8, padding:"6px 10px", fontSize:12 }}>
+                    🔍 Debug
                   </Btn>
-                </>
+                  <Btn onClick={() => { try { localStorage.removeItem("spotify_token"); } catch {} setSpotifyToken(null); setSpotifyPlaylists([]); }}
+                    style={{ background:"#1c2030", color:"#e07070", borderRadius:8, padding:"6px 10px", fontSize:12 }}>
+                    Déco
+                  </Btn>
+                </div>
+              </div>
+              {spotifyLoading && <div style={{ color:MUTED, fontSize:14, textAlign:"center", padding:20 }}>Chargement...</div>}
+              {!spotifyLoading && spotifyPlaylists.length === 0 && (
+                <Btn onClick={loadSpotifyPlaylists} style={{ display:"block", width:"100%", background:"#1DB954", color:"#fff", borderRadius:12, padding:"13px", fontSize:15, fontWeight:700 }}>
+                  Charger mes playlists
+                </Btn>
               )}
               {!spotifyLoading && spotifyPlaylists.length > 0 && spotifyPlaylists.map((pl, i) => {
                 if (!pl) return null;
