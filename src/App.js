@@ -529,17 +529,22 @@ export default function App() {
     const token = spotifyToken || getSpotifyToken();
     if (!token) return;
     setImportingPlaylist(spPlaylist.id);
-    setImportProgress({ done: 0, total: spPlaylist.tracks.total });
+    setImportProgress({ done: 0, total: 0 });
 
     try {
       // Get all tracks
       let tracks = [];
-      let url = `https://api.spotify.com/v1/playlists/${spPlaylist.id}/tracks?limit=50&fields=items(track(name,artists)),next`;
+      let url = "https://api.spotify.com/v1/playlists/" + spPlaylist.id + "/tracks?limit=50";
       while (url) {
-        const data = await spotifyFetch(url, token);
-        const items = (data.items || []).filter(i => i.track?.name);
-        tracks = [...tracks, ...items.map(i => ({ title: i.track.name, artist: i.track.artists?.[0]?.name || "" }))];
-        url = data.next;
+        const r = await fetch(url, { headers: { Authorization: "Bearer " + token } });
+        if (!r.ok) break;
+        const data = await r.json();
+        const items = (data.items || []).filter(i => i && i.track && i.track.name);
+        tracks = [...tracks, ...items.map(i => ({
+          title: i.track.name,
+          artist: (i.track.artists && i.track.artists[0]) ? i.track.artists[0].name : ""
+        }))];
+        url = data.next || null;
       }
 
       setImportProgress({ done: 0, total: tracks.length });
@@ -768,7 +773,7 @@ export default function App() {
               {!spotifyLoading && spotifyPlaylists.length > 0 && spotifyPlaylists.map((pl, i) => {
                 if (!pl) return null;
                 const name = pl.name || "Playlist";
-                const total = (pl.tracks && pl.tracks.total) ? pl.tracks.total : "?";
+                const total = pl.tracks_count || (pl.tracks && pl.tracks.total) || "?";
                 const isImp = importingPlaylist === pl.id;
                 return (
                   <div key={i} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 0", borderBottom:"1px solid " + BORDER }}>
