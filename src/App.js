@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 
 const STORAGE_KEY  = "lyrics_v7";
 const BACKEND      = "https://lyrics-backend-production.up.railway.app";
-const SPOTIFY_CLIENT_ID    = "69c5a063a61a436d83be3136eeeb6059"; // filled via OAuth flow
+const SPOTIFY_CLIENT_ID    = "69c5a063a61a436d83be3136eeeb6059";
 const SPOTIFY_REDIRECT_URI = "https://lyrics-backend-production.up.railway.app/callback";
 const SPOTIFY_SCOPES       = "playlist-read-private playlist-read-collaborative user-library-read";
 
@@ -200,7 +200,7 @@ export default function App() {
   const [spotifyPlaylists, setSpotifyPlaylists] = useState([]);
   const [spotifyLoading, setSpotifyLoading]     = useState(false);
   const [spotifyError, setSpotifyError]         = useState("");
-  const [spotifyClientId, setSpotifyClientId]   = useState(localStorage.getItem("spotify_client_id_saved") || "");
+  const [spotifyClientId, setSpotifyClientId]   = useState(localStorage.getItem("spotify_client_id_saved") || "69c5a063a61a436d83be3136eeeb6059");
   const [importingPlaylist, setImportingPlaylist] = useState(null);
   const [importProgress, setImportProgress]       = useState({ done: 0, total: 0 });
   const [manualCode, setManualCode]               = useState("");
@@ -730,91 +730,68 @@ export default function App() {
           <span style={S.pageTitle}>🎵 Spotify</span>
         </div>
         <div style={S.editBody}>
-          {!spotifyToken ? (
-            <div style={{ padding: "20px 0" }}>
-              {/* Step 1 - Connect */}
-              <div style={{ background: "#0e1a10", border: "1px solid #1DB95444", borderRadius: 14, padding: 16, marginBottom: 16 }}>
-                <div style={{ fontSize: 11, letterSpacing: "0.15em", color: "#1DB954", textTransform: "uppercase", marginBottom: 10 }}>
-                  Étape 1 — Connexion
-                </div>
-                <div style={{ color: MUTED, fontSize: 13, lineHeight: 1.5, marginBottom: 12 }}>
-                  Entre ton Client ID Spotify puis connecte-toi. Une page s'ouvrira dans Safari.
-                </div>
-                <input
-                  value={spotifyClientId}
-                  onChange={e => setSpotifyClientId(e.target.value)}
-                  placeholder="Client ID Spotify (ex: a1b2c3...)"
-                  style={{ ...S.input, marginBottom: 10 }}
-                />
-                <Btn onClick={connectSpotify} style={{ display: "block", width: "100%", background: "#1DB954", color: "#fff", borderRadius: 12, padding: "13px", fontSize: 15, fontWeight: 700 }}>
-                  🎵 Se connecter avec Spotify
-                </Btn>
-              </div>
 
-              {/* Step 2 - Enter code */}
-              <div style={{ background: "#0e1520", border: `1px solid ${GOLD}44`, borderRadius: 14, padding: 16 }}>
-                <div style={{ fontSize: 11, letterSpacing: "0.15em", color: GOLD, textTransform: "uppercase", marginBottom: 10 }}>
-                  Étape 2 — Entre le code affiché
-                </div>
-                <div style={{ color: MUTED, fontSize: 13, lineHeight: 1.5, marginBottom: 12 }}>
-                  Après avoir autorisé Spotify, une page affiche un code court. Reviens ici et colle-le.
-                </div>
-                <input
-                  value={manualCode}
-                  onChange={e => setManualCode(e.target.value)}
-                  placeholder="Code (ex: abc123)"
-                  style={{ ...S.input, marginBottom: 10, textAlign: "center", fontSize: 18, letterSpacing: "0.1em" }}
-                />
-                <Btn onClick={redeemManualCode} style={{ display: "block", width: "100%", background: manualCodeLoading ? "#1c2030" : GOLD, color: manualCodeLoading ? "#555" : "#000", borderRadius: 12, padding: "13px", fontSize: 15, fontWeight: 700 }}>
-                  {manualCodeLoading ? "Vérification..." : "✅ Valider le code"}
-                </Btn>
-              </div>
+          {/* Étape 1 — Connexion */}
+          <div style={{ background:"#0e1a10", border:"1px solid #1DB95444", borderRadius:14, padding:16, marginBottom:16 }}>
+            <div style={{ fontSize:11, letterSpacing:"0.15em", color:"#1DB954", textTransform:"uppercase", marginBottom:10 }}>Étape 1 — Connexion</div>
+            <div style={{ color:MUTED, fontSize:13, lineHeight:1.5, marginBottom:12 }}>Entre ton Client ID Spotify puis appuie sur Se connecter.</div>
+            <input value={spotifyClientId} onChange={e => setSpotifyClientId(e.target.value)}
+              placeholder="Client ID Spotify" style={{ ...S.input, marginBottom:10 }} />
+            <Btn onClick={connectSpotify} style={{ display:"block", width:"100%", background:"#1DB954", color:"#fff", borderRadius:12, padding:"13px", fontSize:15, fontWeight:700 }}>
+              🎵 Se connecter avec Spotify
+            </Btn>
+          </div>
 
-              {spotifyError && <div style={{ marginTop: 12, color: "#e07070", fontSize: 13, textAlign: "center" }}>{spotifyError}</div>}
-            </div>
-          ) : (
-            <>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                <div style={{ color: TEXT, fontSize: 16, fontWeight: 700 }}>Mes playlists Spotify</div>
-                <Btn onClick={() => { localStorage.removeItem("spotify_token"); setSpotifyToken(null); setSpotifyPlaylists([]); }} style={{ ...S.iconBtn, color: "#e07070", fontSize: 12 }}>
-                  Déconnexion
+          {/* Étape 2 — Code manuel */}
+          <div style={{ background:"#0e1520", border:"1px solid #e8c97a44", borderRadius:14, padding:16, marginBottom:16 }}>
+            <div style={{ fontSize:11, letterSpacing:"0.15em", color:GOLD, textTransform:"uppercase", marginBottom:10 }}>Étape 2 — Entre le code</div>
+            <div style={{ color:MUTED, fontSize:13, lineHeight:1.5, marginBottom:12 }}>Après avoir autorisé Spotify, une page affiche un code. Reviens ici et colle-le.</div>
+            <input value={manualCode} onChange={e => setManualCode(e.target.value)}
+              placeholder="Code court (ex: abc123)" style={{ ...S.input, marginBottom:10, textAlign:"center", fontSize:18 }} />
+            <Btn onClick={redeemManualCode} style={{ display:"block", width:"100%", background:manualCodeLoading ? "#1c2030" : GOLD, color:manualCodeLoading ? "#555" : "#000", borderRadius:12, padding:"13px", fontSize:15, fontWeight:700 }}>
+              {manualCodeLoading ? "Vérification..." : "✅ Valider le code"}
+            </Btn>
+          </div>
+
+          {spotifyError && <div style={{ color:"#e07070", fontSize:13, marginBottom:12, textAlign:"center" }}>{spotifyError}</div>}
+
+          {/* Étape 3 — Playlists */}
+          {spotifyToken && (
+            <div style={{ background:CARD, border:"1px solid " + BORDER, borderRadius:14, padding:16 }}>
+              <div style={{ fontSize:11, letterSpacing:"0.15em", color:GOLD, textTransform:"uppercase", marginBottom:10 }}>Étape 3 — Importer une playlist</div>
+              {spotifyLoading && <div style={{ color:MUTED, fontSize:14, textAlign:"center", padding:20 }}>Chargement des playlists...</div>}
+              {!spotifyLoading && spotifyPlaylists.length === 0 && (
+                <Btn onClick={loadSpotifyPlaylists} style={{ display:"block", width:"100%", background:"#1DB954", color:"#fff", borderRadius:12, padding:"13px", fontSize:15, fontWeight:700 }}>
+                  Charger mes playlists
                 </Btn>
-              </div>
-              {spotifyError && <div style={{ color: "#e07070", fontSize: 13, marginBottom: 12 }}>{spotifyError}</div>}
-              {spotifyLoading ? (
-                <div style={{ textAlign: "center", color: MUTED, padding: 40 }}>Chargement...</div>
-              ) : (
-                spotifyPlaylists.map(pl => (
-                  <div key={pl.id} style={{ ...S.row, marginBottom: 10, flexDirection: "column", alignItems: "stretch", gap: 8 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      {pl.images?.[0]?.url && <img src={pl.images[0].url} alt="" style={{ width: 44, height: 44, borderRadius: 8, objectFit: "cover", flexShrink: 0 }} />}
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={S.rowTitle}>{pl.name}</div>
-                        <div style={S.rowSub}>{pl.tracks.total} titres</div>
-                      </div>
-                      <Btn
-                        onClick={() => importSpotifyPlaylist(pl)}
-                        style={{ ...S.singBtn, background: importingPlaylist === pl.id ? "#2a2d36" : "#1DB954", color: "#fff", fontSize: 13 }}
-                      >
-                        {importingPlaylist === pl.id ? `${importProgress.done}/${importProgress.total}` : "Importer"}
-                      </Btn>
-                    </div>
-                    {importingPlaylist === pl.id && (
-                      <div style={{ height: 3, background: "#1a1d28", borderRadius: 3, overflow: "hidden" }}>
-                        <div style={{ height: "100%", width: `${(importProgress.done / importProgress.total) * 100}%`, background: "#1DB954", borderRadius: 3, transition: "width 0.3s ease" }} />
-                      </div>
-                    )}
-                  </div>
-                ))
               )}
-            </>
+              {!spotifyLoading && spotifyPlaylists.length > 0 && spotifyPlaylists.map((pl, i) => {
+                if (!pl) return null;
+                const name = pl.name || "Playlist";
+                const total = (pl.tracks && pl.tracks.total) ? pl.tracks.total : "?";
+                const isImp = importingPlaylist === pl.id;
+                return (
+                  <div key={i} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 0", borderBottom:"1px solid " + BORDER }}>
+                    <div style={{ minWidth:0, flex:1 }}>
+                      <div style={{ color:TEXT, fontSize:14, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{name}</div>
+                      <div style={{ color:MUTED, fontSize:12 }}>{total} titres</div>
+                    </div>
+                    <Btn onClick={() => importSpotifyPlaylist(pl)}
+                      style={{ background:isImp ? "#2a2d36" : "#1DB954", color:"#fff", borderRadius:20, padding:"8px 14px", fontSize:13, fontWeight:700, marginLeft:10, flexShrink:0, whiteSpace:"nowrap" }}>
+                      {isImp ? (importProgress.done + "/" + importProgress.total) : "Importer"}
+                    </Btn>
+                  </div>
+                );
+              })}
+            </div>
           )}
+
         </div>
       </div>
     );
   }
 
-  // ════════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════════
   // EDIT VIEW
   // ════════════════════════════════════════════════════════════════════════════
   if (view === "edit") {
