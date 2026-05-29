@@ -682,7 +682,23 @@ const MUTED  = "#555";
 const globalCSS = `
   *, *::before, *::after { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { overflow: hidden; position: fixed; width: 100%; height: 100%; overscroll-behavior: none; }
-  input, textarea { -webkit-appearance: none; appearance: none; }
+  input, textarea {
+    -webkit-appearance: none;
+    appearance: none;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.07) !important;
+    outline: none !important;
+    background: #13161d;
+    color: #e0d8c8;
+    box-shadow: none !important;
+    -webkit-box-shadow: none !important;
+  }
+  input:focus, textarea:focus {
+    border: 1px solid rgba(232,201,122,0.4) !important;
+    outline: none !important;
+    box-shadow: none !important;
+    -webkit-box-shadow: none !important;
+  }
   @keyframes pulse { 0%,100%{opacity:.2} 50%{opacity:.8} }
 `;
 
