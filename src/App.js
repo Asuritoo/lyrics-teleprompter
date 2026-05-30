@@ -155,6 +155,11 @@ export default function App() {
   const [showVideo, setShowVideo] = useState(true);
   const [ytBlocked, setYtBlocked] = useState(false);
   const [muted, setMuted]         = useState(false);
+  const [miniPlayer, setMiniPlayer]           = useState(false);
+  const [showVideoSearch, setShowVideoSearch] = useState(false);
+  const [videoSearchQuery, setVideoSearchQuery] = useState("");
+  const [videoSearchResults, setVideoSearchResults] = useState([]);
+  const [videoSearching, setVideoSearching]   = useState(false);
 
   // Search/edit
   const [sq, setSq]               = useState({ title:"", artist:"" });
@@ -209,7 +214,7 @@ export default function App() {
 
   // Sync loop
   useEffect(() => {
-    if ((view !== "sing" && !miniPlayer) || !playing) {
+    if ((!playing) || (view !== "sing" && !miniPlayer)) {
       cancelAnimationFrame(syncRafRef.current); cancelAnimationFrame(rafRef.current);
       if (!playing) baseElapsed.current = elapsedRef.current;
       return;
@@ -252,9 +257,11 @@ export default function App() {
 
   // ── Actions ──
   async function startSing(song) {
+    // Clean up existing player
     try { ytPlayerRef.current?.stopVideo?.(); ytPlayerRef.current?.destroy?.(); } catch {}
     ytPlayerRef.current = null; usingYT.current = false;
     cancelAnimationFrame(rafRef.current); cancelAnimationFrame(syncRafRef.current);
+    setMiniPlayer(false);
     let finalSong = { ...song };
     // Auto-fetch missing data on first play
     const needsVideo = !song.videoId;
@@ -553,135 +560,158 @@ export default function App() {
     const fontSize = active.fontSize ?? 24;
     const hasYT = !!active.videoId;
     return (
-      <div style={{...S.singWrap,animation:"slideUp 0.3s ease"}}>
+      <div style={{...S.singWrap, animation:"slideUp 0.3s ease"}}>
         <style>{CSS}</style>
-        {/* Bar */}
+
+        {/* Top bar */}
         <div style={S.singBar}>
-          {!locked ? <>
-            <Btn onClick={stopSing} style={S.singBack}>✕</Btn>
-            <div style={{flex:1,minWidth:0,padding:"0 8px"}}>
-              <div style={S.singTitle}>{active.title}</div>
-              {active.artist&&<div style={S.singArtist}>{active.artist}</div>}
-            </div>
-            {hasYT&&<Btn onClick={()=>setShowVideo(v=>!v)} style={{...S.singIcon,color:showVideo?"#1DB954":"#535353"}}>{showVideo?"🎬":"🎵"}</Btn>}
-            {hasYT&&<Btn onClick={toggleMute} style={{...S.singIcon,color:muted?"#f15e6c":"#535353"}}>{muted?"🔇":"🔊"}</Btn>}
-            <Btn onClick={()=>seek(-5)} style={S.singIcon}>−5s</Btn>
-            <Btn onClick={togglePlay} style={{...S.singPlay,background:playing?"#1DB954":"#282828"}}>
-              <span style={{color:playing?"#000":"#fff",fontSize:20}}>{playing?"⏸":"▶"}</span>
-            </Btn>
-            <Btn onClick={()=>seek(5)} style={S.singIcon}>+5s</Btn>
-            <Btn onClick={()=>{vibrate(20);setLocked(true);}} style={S.singIcon}>🔒</Btn>
-          </> : <>
-            <span style={{color:"#535353",fontSize:12,flex:1}}>🔒 Verrouillé</span>
-            <Btn onClick={togglePlay} style={{...S.singPlay,background:playing?"#1DB954":"#282828"}}>
-              <span style={{color:playing?"#000":"#fff",fontSize:20}}>{playing?"⏸":"▶"}</span>
-            </Btn>
-            <Btn onClick={()=>{vibrate(20);setLocked(false);}} style={{...S.singIcon,color:"#1DB954"}}>🔓</Btn>
-          </>}
+          {!locked ? (
+            <>
+              <Btn onClick={stopSing} style={S.singBack}>✕</Btn>
+              <div style={{flex:1, minWidth:0, padding:"0 8px"}}>
+                <div style={S.singTitle}>{active.title}</div>
+                {active.artist && <div style={S.singArtist}>{active.artist}</div>}
+              </div>
+              {hasYT && <Btn onClick={()=>setShowVideo(v=>!v)} style={{...S.singIcon, color:showVideo?"#1DB954":"#535353"}}>{showVideo?"🎬":"🎵"}</Btn>}
+              {hasYT && <Btn onClick={toggleMute} style={{...S.singIcon, color:muted?"#f15e6c":"#535353"}}>{muted?"🔇":"🔊"}</Btn>}
+              <Btn onClick={()=>{setShowVideoSearch(true); setVideoSearchQuery(active.title+" "+(active.artist||""));}} style={{...S.singIcon, color:"#535353"}}>🔎</Btn>
+              <Btn onClick={()=>seek(-5)} style={S.singIcon}>−5s</Btn>
+              <Btn onClick={togglePlay} style={{...S.singPlay, background:playing?"#1DB954":"#282828"}}>
+                <span style={{color:playing?"#000":"#fff", fontSize:20}}>{playing?"⏸":"▶"}</span>
+              </Btn>
+              <Btn onClick={()=>seek(5)} style={S.singIcon}>+5s</Btn>
+              <Btn onClick={()=>{vibrate(20); setLocked(true);}} style={S.singIcon}>🔒</Btn>
+            </>
+          ) : (
+            <>
+              <span style={{color:"#535353", fontSize:12, flex:1}}>🔒 Verrouillé</span>
+              <Btn onClick={togglePlay} style={{...S.singPlay, background:playing?"#1DB954":"#282828"}}>
+                <span style={{color:playing?"#000":"#fff", fontSize:20}}>{playing?"⏸":"▶"}</span>
+              </Btn>
+              <Btn onClick={()=>{vibrate(20); setLocked(false);}} style={{...S.singIcon, color:"#1DB954"}}>🔓</Btn>
+            </>
+          )}
         </div>
-        {/* YouTube */}
-        {hasYT&&(
-          <div style={{...S.ytWrap,height:showVideo?200:0}}>
-            <div id="yt-player" style={{width:"100%",height:"100%"}}/>
+
+        {/* YouTube player */}
+        {hasYT && (
+          <div style={{...S.ytWrap, height:showVideo?200:0}}>
+            <div id="yt-player" style={{width:"100%", height:"100%"}}/>
           </div>
         )}
-        {/* Hidden YT player for mini player mode */}
-        {!hasYT && miniPlayer && active?.videoId && (
-          <div style={{position:"absolute",width:1,height:1,overflow:"hidden",opacity:0,pointerEvents:"none"}}>
-            <div id="yt-player"/>
-          </div>
-        )}
+
         {/* Timer */}
         <div style={S.timerRow}>
-          <span style={{fontFamily:"monospace",fontSize:12,color:"#535353"}}>{fmt(elapsed)}</span>
-          {!playing&&elapsed<0.5&&<span style={{color:"#535353",fontSize:11,marginLeft:10,animation:"pulse 2s infinite"}}>{hasYT?"Appuie sur ▶":"Lance ta musique puis ▶"}</span>}
+          <span style={{fontFamily:"monospace", fontSize:12, color:"#535353"}}>{fmt(elapsed)}</span>
+          {!playing && elapsed < 0.5 && (
+            <span style={{color:"#535353", fontSize:11, marginLeft:10, animation:"pulse 2s infinite"}}>
+              {hasYT ? "Appuie sur ▶" : "Lance ta musique puis ▶"}
+            </span>
+          )}
         </div>
+
         {/* Lyrics */}
         <div ref={scrollRef} style={S.lyricsScroll}>
           <div style={S.fadeTop}/>
           <div style={S.fadeBot}/>
           <div style={{padding:"80px 16px 200px"}}>
             {hasSynced ? (()=>{
-              const introGap=lines[0]?.time??0;
-              const introProgress=introGap>1.5?Math.min(1,elapsed/introGap):1;
-              const introIsPast=elapsed>=(lines[0]?.time??0);
-              return <>
-                {introGap>1.5&&<div style={{margin:"0 auto 20px",maxWidth:160,height:2,background:"#282828",borderRadius:2,overflow:"hidden"}}>
-                  <div style={{height:"100%",width:`${introProgress*100}%`,background:introIsPast?"#282828":"#1DB954",borderRadius:2,transition:"none"}}/>
-                </div>}
-                {lines.map((line,i)=>{
-                  const isCurrent=i===activeIdx,isPast=i<activeIdx,isNext=i===activeIdx+1;
-                  const nextLine=lines[i+1],gap=nextLine?nextLine.time-line.time:0;
-                  const barProg=(gap>1.5&&isCurrent)?Math.min(1,(elapsed-line.time)/gap):0;
-                  return <div key={i}>
-                    <div ref={el=>lineRefs.current[i]=el} onClick={()=>seekToLine(line)} style={{
-                      textAlign:"center",maxWidth:580,margin:"0 auto",padding:"4px 8px",
-                      fontSize:isCurrent?fontSize:isNext?Math.round(fontSize*.85):Math.round(fontSize*.65),
-                      fontWeight:isCurrent?700:isNext?500:400,
-                      color:isCurrent?"#fff":isPast?"#282828":isNext?"#727272":"#535353",transition:"font-size .25s cubic-bezier(.4,0,.2,1),color .3s ease",
-                      transition:"font-size .2s ease,color .2s ease",
-                      lineHeight:1.5,letterSpacing:isCurrent?"0.01em":"normal",cursor:"pointer",
-                      fontFamily:"'Circular Std','Helvetica Neue',sans-serif",
-                    }}>{line.text}</div>
-                    {gap>1.5&&<div style={{margin:"8px auto",maxWidth:160,height:2,background:"#282828",borderRadius:2,overflow:"hidden"}}>
-                      <div style={{height:"100%",width:isPast?"100%":isCurrent?`${barProg*100}%`:"0%",background:isPast?"#282828":"#1DB954",borderRadius:2,transition:"none"}}/>
-                    </div>}
-                  </div>;
-                })}
-              </>;
+              const introGap = lines[0]?.time ?? 0;
+              const introProgress = introGap > 1.5 ? Math.min(1, elapsed/introGap) : 1;
+              const introIsPast = elapsed >= (lines[0]?.time ?? 0);
+              return (
+                <>
+                  {introGap > 1.5 && (
+                    <div style={{margin:"0 auto 20px", maxWidth:160, height:2, background:"#282828", borderRadius:2, overflow:"hidden"}}>
+                      <div style={{height:"100%", width:`${introProgress*100}%`, background:introIsPast?"#282828":"#1DB954", borderRadius:2, transition:"none"}}/>
+                    </div>
+                  )}
+                  {lines.map((line,i) => {
+                    const isCurrent = i===activeIdx, isPast = i<activeIdx, isNext = i===activeIdx+1;
+                    const nextLine = lines[i+1], gap = nextLine ? nextLine.time-line.time : 0;
+                    const barProg = (gap>1.5&&isCurrent) ? Math.min(1,(elapsed-line.time)/gap) : 0;
+                    return (
+                      <div key={i}>
+                        <div
+                          ref={el=>lineRefs.current[i]=el}
+                          onClick={()=>seekToLine(line)}
+                          style={{
+                            textAlign:"center", maxWidth:580, margin:"0 auto", padding:"4px 8px",
+                            fontSize: isCurrent?fontSize : isNext?Math.round(fontSize*.85) : Math.round(fontSize*.65),
+                            fontWeight: isCurrent?700 : isNext?500 : 400,
+                            color: isCurrent?"#fff" : isPast?"#282828" : isNext?"#727272" : "#535353",
+                            transition:"font-size .25s cubic-bezier(.4,0,.2,1), color .3s ease",
+                            lineHeight:1.5, letterSpacing:isCurrent?"0.01em":"normal",
+                            cursor:"pointer",
+                            fontFamily:"'Circular Std','Helvetica Neue',sans-serif",
+                          }}
+                        >{line.text}</div>
+                        {gap > 1.5 && (
+                          <div style={{margin:"8px auto", maxWidth:160, height:2, background:"#282828", borderRadius:2, overflow:"hidden"}}>
+                            <div style={{height:"100%", width:isPast?"100%":isCurrent?`${barProg*100}%`:"0%", background:isPast?"#282828":"#1DB954", borderRadius:2, transition:"none"}}/>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </>
+              );
             })() : active.lyrics && active.lyrics.trim()
-              ? active.lyrics.split("\n").map((line,i)=>(
-                  <div key={i} style={{textAlign:"center",fontSize,color:"#fff",padding:"3px 16px",lineHeight:1.65,maxWidth:560,margin:"0 auto",fontFamily:"'Circular Std','Helvetica Neue',sans-serif"}}>
-                    {line||<span style={{opacity:0}}>·</span>}
+              ? active.lyrics.split("\n").map((line,i) => (
+                  <div key={i} style={{textAlign:"center", fontSize, color:"#fff", padding:"3px 16px", lineHeight:1.65, maxWidth:560, margin:"0 auto", fontFamily:"'Circular Std','Helvetica Neue',sans-serif"}}>
+                    {line || <span style={{opacity:0}}>·</span>}
                   </div>
                 ))
-              : <div style={{textAlign:"center",color:"#535353",padding:"60px 20px"}}>
-                  <div style={{fontSize:32,marginBottom:12}}>🎵</div>
-                  <div style={{fontSize:15}}>Pas de paroles disponibles</div>
-                  <div style={{fontSize:13,marginTop:8}}>Lance ta musique sur Spotify</div>
-                </div>
+              : (
+                  <div style={{textAlign:"center", color:"#535353", padding:"60px 20px"}}>
+                    <div style={{fontSize:32, marginBottom:12}}>🎵</div>
+                    <div style={{fontSize:15}}>Pas de paroles disponibles</div>
+                    <div style={{fontSize:13, marginTop:8}}>Lance ta musique sur Spotify</div>
+                  </div>
+                )
             }
             <div style={{height:120}}/>
           </div>
         </div>
-      {/* Video search modal */}
-      {showVideoSearch && (
-        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.92)",zIndex:100,display:"flex",flexDirection:"column",paddingTop:"max(16px,env(safe-area-inset-top))"}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,padding:"0 12px 12px",borderBottom:"1px solid #282828"}}>
-            <Btn onClick={()=>{setShowVideoSearch(false);setVideoSearchResults([]);}} style={{background:"transparent",color:"#aaa",fontSize:18,padding:"8px 4px"}}>✕</Btn>
-            <input
-              value={videoSearchQuery}
-              onChange={e=>setVideoSearchQuery(e.target.value)}
-              onKeyDown={e=>e.key==="Enter"&&searchVideo()}
-              placeholder="Chercher une vidéo YouTube..."
-              style={{flex:1,background:"#282828",borderRadius:8,padding:"10px 12px",color:"#fff",fontSize:14,fontFamily:"inherit",border:"none",outline:"none"}}
-              autoFocus
-            />
-            <Btn onClick={searchVideo} style={{background:"#1DB954",color:"#000",borderRadius:8,padding:"10px 14px",fontSize:14,fontWeight:700}}>
-              {videoSearching?"...":"🔍"}
-            </Btn>
-          </div>
-          <div style={{flex:1,overflowY:"auto",padding:"12px"}}>
-            {videoSearching && <div style={{textAlign:"center",color:"#535353",padding:40}}>Recherche...</div>}
-            {!videoSearching && videoSearchResults.length===0 && (
-              <div style={{textAlign:"center",color:"#535353",padding:40,fontSize:14}}>
-                Cherche une vidéo pour synchroniser avec les paroles
-              </div>
-            )}
-            {videoSearchResults.map(video=>(
-              <Btn key={video.videoId} onClick={()=>applyVideo(video)} style={{display:"flex",alignItems:"center",gap:10,width:"100%",background:"#181818",borderRadius:8,padding:"10px",marginBottom:8,textAlign:"left"}}>
-                <img src={video.thumbnail} alt="" style={{width:80,height:45,objectFit:"cover",borderRadius:4,flexShrink:0}}/>
-                <div style={{flex:1,minWidth:0}}>
-                  <div style={{color:"#fff",fontSize:13,fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{video.videoTitle}</div>
-                  <div style={{color:"#727272",fontSize:11,marginTop:2}}>{video.channel}</div>
-                </div>
-                <span style={{color:"#1DB954",fontSize:18,flexShrink:0}}>▶</span>
+
+        {/* Video search modal */}
+        {showVideoSearch && (
+          <div style={{position:"fixed", inset:0, background:"rgba(0,0,0,0.92)", zIndex:100, display:"flex", flexDirection:"column", paddingTop:"max(16px,env(safe-area-inset-top))"}}>
+            <div style={{display:"flex", alignItems:"center", gap:8, padding:"0 12px 12px", borderBottom:"1px solid #282828"}}>
+              <Btn onClick={()=>{setShowVideoSearch(false); setVideoSearchResults([]);}} style={{background:"transparent", color:"#aaa", fontSize:18, padding:"8px 4px"}}>✕</Btn>
+              <input
+                value={videoSearchQuery}
+                onChange={e=>setVideoSearchQuery(e.target.value)}
+                onKeyDown={e=>e.key==="Enter"&&searchVideo()}
+                placeholder="Chercher une vidéo YouTube..."
+                style={{flex:1, background:"#282828", borderRadius:8, padding:"10px 12px", color:"#fff", fontSize:14, fontFamily:"inherit", border:"none", outline:"none"}}
+                autoFocus
+              />
+              <Btn onClick={searchVideo} style={{background:"#1DB954", color:"#000", borderRadius:8, padding:"10px 14px", fontSize:14, fontWeight:700}}>
+                {videoSearching?"...":"🔍"}
               </Btn>
-            ))}
+            </div>
+            <div style={{flex:1, overflowY:"auto", padding:"12px"}}>
+              {videoSearching && <div style={{textAlign:"center", color:"#535353", padding:40}}>Recherche...</div>}
+              {!videoSearching && videoSearchResults.length===0 && (
+                <div style={{textAlign:"center", color:"#535353", padding:40, fontSize:14}}>
+                  Cherche une vidéo pour synchroniser avec les paroles
+                </div>
+              )}
+              {videoSearchResults.map(video => (
+                <Btn key={video.videoId} onClick={()=>applyVideo(video)} style={{display:"flex", alignItems:"center", gap:10, width:"100%", background:"#181818", borderRadius:8, padding:"10px", marginBottom:8, textAlign:"left"}}>
+                  <img src={video.thumbnail} alt="" style={{width:80, height:45, objectFit:"cover", borderRadius:4, flexShrink:0}}/>
+                  <div style={{flex:1, minWidth:0}}>
+                    <div style={{color:"#fff", fontSize:13, fontWeight:600, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis"}}>{video.videoTitle}</div>
+                    <div style={{color:"#727272", fontSize:11, marginTop:2}}>{video.channel}</div>
+                  </div>
+                  <span style={{color:"#1DB954", fontSize:18, flexShrink:0}}>▶</span>
+                </Btn>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
-    </div>
+        )}
+      </div>
     );
   }
 
@@ -980,6 +1010,7 @@ export default function App() {
             <Btn onClick={e=>{e.stopPropagation();fullStop();}} style={{background:"transparent",color:"#535353",fontSize:18,padding:"8px 6px"}}>✕</Btn>
           </div>
         </div>
+      </div>
       )}
 
       {/* Bottom nav */}
