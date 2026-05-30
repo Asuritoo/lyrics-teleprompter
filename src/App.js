@@ -444,24 +444,26 @@ export default function App() {
     let ytDone = 0;
     setImportProgress({done:0, total:songsToEnrich.length, active:true, phase:"youtube"});
 
-    for (let i = 0; i < songsToEnrich.length; i++) {
-      const song = songsToEnrich[i];
-      try {
-        const r = await fetch(BACKEND + "/search?title=" + encodeURIComponent(song.title) + "&artist=" + encodeURIComponent(song.artist||""));
-        if (r.ok) {
-          const data = await r.json();
-          if (data.videoId) {
-            setSongs(s => s.map(x => x.id === song.id
-              ? {...x, videoId:data.videoId, videoTitle:data.videoTitle, thumbnail:data.thumbnail}
-              : x
-            ));
+    const YT_BATCH2 = 5;
+    let ytDone2 = 0;
+    for (let b = 0; b < songsToEnrich.length; b += YT_BATCH2) {
+      const batch = songsToEnrich.slice(b, b + YT_BATCH2);
+      await Promise.all(batch.map(async song => {
+        try {
+          const r = await fetch(BACKEND+"/search?title="+encodeURIComponent(song.title)+"&artist="+encodeURIComponent(song.artist||""));
+          if (r.ok) {
+            const data = await r.json();
+            if (data.videoId) {
+              setSongs(s => s.map(x => x.id===song.id
+                ? {...x, videoId:data.videoId, videoTitle:data.videoTitle, thumbnail:data.thumbnail}
+                : x
+              ));
+            }
           }
-        }
-      } catch {}
-      ytDone++;
-      setImportProgress({done:ytDone, total:songsToEnrich.length, active:true, phase:"youtube"});
-      // Small delay to avoid hammering the API
-      await new Promise(res => setTimeout(res, 150));
+        } catch {}
+        ytDone2++;
+        setImportProgress({done:ytDone2, total:songsToEnrich.length, active:true, phase:"youtube"});
+      }));
     }
     setImportProgress({done:0, total:0, active:false, phase:null});
   }
@@ -471,22 +473,26 @@ export default function App() {
     const toEnrich = songs.filter(s => !s.videoId);
     if (toEnrich.length === 0) { alert("Toutes les chansons ont déjà une vidéo !"); return; }
     setImportProgress({done:0, total:toEnrich.length, active:true, phase:"youtube"});
-    for (let i = 0; i < toEnrich.length; i++) {
-      const song = toEnrich[i];
-      try {
-        const r = await fetch(BACKEND+"/search?title="+encodeURIComponent(song.title)+"&artist="+encodeURIComponent(song.artist||""));
-        if (r.ok) {
-          const data = await r.json();
-          if (data.videoId) {
-            setSongs(s => s.map(x => x.id===song.id
-              ? {...x, videoId:data.videoId, videoTitle:data.videoTitle, thumbnail:data.thumbnail}
-              : x
-            ));
+    const YT_BATCH = 5;
+    let ytDoneE = 0;
+    for (let b = 0; b < toEnrich.length; b += YT_BATCH) {
+      const batch = toEnrich.slice(b, b + YT_BATCH);
+      await Promise.all(batch.map(async song => {
+        try {
+          const r = await fetch(BACKEND+"/search?title="+encodeURIComponent(song.title)+"&artist="+encodeURIComponent(song.artist||""));
+          if (r.ok) {
+            const data = await r.json();
+            if (data.videoId) {
+              setSongs(s => s.map(x => x.id===song.id
+                ? {...x, videoId:data.videoId, videoTitle:data.videoTitle, thumbnail:data.thumbnail}
+                : x
+              ));
+            }
           }
-        }
-      } catch {}
-      setImportProgress({done:i+1, total:toEnrich.length, active:true, phase:"youtube"});
-      await new Promise(res => setTimeout(res, 150));
+        } catch {}
+        ytDoneE++;
+        setImportProgress({done:ytDoneE, total:toEnrich.length, active:true, phase:"youtube"});
+      }));
     }
     setImportProgress({done:0, total:0, active:false, phase:null});
   }
