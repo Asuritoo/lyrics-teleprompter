@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 
 const STORAGE_KEY = "lyrics_v8";
 const BACKEND = "https://lyrics-backend-production.up.railway.app";
@@ -144,6 +144,7 @@ export default function App() {
   const [showNewPlaylist, setShowNewPlaylist] = useState(false);
   const [newPlaylistName, setNewPlaylistName] = useState("");
   const [addToPlaylistSong, setAddToPlaylistSong] = useState(null);
+  const [editingPlaylistCover, setEditingPlaylistCover] = useState(null);
 
   // Karaoke
   const [playing, setPlaying]     = useState(false);
@@ -366,6 +367,12 @@ export default function App() {
       setSearchMsg(parts.join(" · "));
     } catch { setSearchMsg("❌ Introuvable. Vérifie le titre ou l'artiste."); }
     finally { setSearching(false); }
+  }
+
+  function updatePlaylistCover(plId, updates) {
+    setPlaylists(p => p.map(pl => pl.id===plId ? {...pl,...updates} : pl));
+    // Also update editingPlaylistCover to show preview
+    setEditingPlaylistCover(prev => prev ? {...prev,...updates} : prev);
   }
 
   function createPlaylist(name) {
@@ -601,7 +608,9 @@ export default function App() {
         <style>{CSS}</style>
         <div style={S.subHeader}>
           <Btn onClick={()=>{setView("lib");setActivePlaylist(null);}} style={S.backBtn}>←</Btn>
-          <span style={S.subTitle}>{activePlaylist.name}</span>
+          <PlaylistCover playlist={activePlaylist} size={36} onClick={()=>setEditingPlaylistCover(activePlaylist)}/>
+          <span style={{...S.subTitle,flex:1}}>{activePlaylist.name}</span>
+          <Btn onClick={()=>setEditingPlaylistCover(activePlaylist)} style={{background:"transparent",color:"#727272",fontSize:13,padding:"4px 8px"}}>✏️ Modifier</Btn>
         </div>
         <div style={S.scrollBody}>
           {playlistSongs.length===0&&<div style={S.empty}><div style={{fontSize:40,marginBottom:8}}>🎵</div><div style={{color:"#535353"}}>Playlist vide</div></div>}
@@ -638,7 +647,7 @@ export default function App() {
           <div style={S.sectionTitle}>Mes playlists</div>
           {playlists.slice(0,4).map(pl=>(
             <Btn key={pl.id} onClick={()=>{setActivePlaylist(pl);setView("playlist_detail");}} style={S.playlistRow}>
-              <div style={{width:56,height:56,background:"#282828",borderRadius:4,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>🎵</div>
+              <PlaylistCover playlist={pl} size={56}/>
               <div style={{flex:1,minWidth:0}}>
                 <div style={{color:"#fff",fontWeight:700,fontSize:15}}>{pl.name}</div>
                 <div style={{color:"#727272",fontSize:13}}>{pl.fromSpotify?"Playlist • Spotify":"Playlist"} • {pl.songIds.length} titres</div>
@@ -681,7 +690,7 @@ export default function App() {
       </div>
       {playlists.map(pl=>(
         <Btn key={pl.id} onClick={()=>{setActivePlaylist(pl);setView("playlist_detail");}} style={S.playlistRow}>
-          <div style={{width:56,height:56,background:"#333",borderRadius:4,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>🎵</div>
+          <PlaylistCover playlist={pl} size={56}/>
           <div style={{flex:1,minWidth:0}}>
             <div style={{color:"#fff",fontWeight:700,fontSize:15,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{pl.name}</div>
             <div style={{color:"#727272",fontSize:13}}>{pl.fromSpotify?"Playlist · Spotify":"Playlist"} · {pl.songIds.length} titres</div>
@@ -798,6 +807,124 @@ export default function App() {
           </div>
         </div>
       )}
+      {/* Playlist cover editor */}
+      {editingPlaylistCover && (
+        <PlaylistImageEditor
+          playlist={editingPlaylistCover}
+          onUpdate={updates => {
+            updatePlaylistCover(editingPlaylistCover.id, updates);
+            setEditingPlaylistCover(prev => ({...prev,...updates}));
+            if (activePlaylist?.id === editingPlaylistCover.id) {
+              setActivePlaylist(prev => prev ? {...prev,...updates} : prev);
+            }
+          }}
+          onClose={() => setEditingPlaylistCover(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Playlist Cover ──────────────────────────────────────────────────────────
+function PlaylistCover({ playlist, size=56, onClick }) {
+  const style = {
+    width: size, height: size, borderRadius: 4, flexShrink: 0,
+    display: "flex", alignItems: "center", justifyContent: "center",
+    cursor: onClick ? "pointer" : "default", overflow: "hidden",
+    background: playlist.coverColor || "#282828",
+    fontSize: size * 0.4,
+    position: "relative",
+  };
+  if (playlist.coverImage) {
+    return <div style={style} onClick={onClick}>
+      <img src={playlist.coverImage} alt="" style={{width:"100%",height:"100%",objectFit:"cover",position:"absolute",inset:0}}/>
+    </div>;
+  }
+  return <div style={style} onClick={onClick}>
+    {playlist.coverEmoji || "🎵"}
+  </div>;
+}
+
+// ─── Playlist Image Editor ────────────────────────────────────────────────────
+const COLORS = ["#282828","#1DB954","#E91429","#2D46B9","#E8115B","#FF6437","#8D67AB","#148A08","#F037A5","#BA5D07","#1e3264","#7358ff"];
+const EMOJIS = ["🎵","🎸","🎤","🎹","🥁","🎷","🎺","🎻","🎧","🎶","🔥","💿","🎼","🌟","💜","🏆","🎭","🌈","⚡","🎪"];
+
+function PlaylistImageEditor({ playlist, onUpdate, onClose }) {
+  const [tab, setTab] = React.useState("color");
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:300,display:"flex",alignItems:"flex-end"}} onClick={onClose}>
+      <div style={{background:"#282828",borderRadius:"16px 16px 0 0",width:"100%",padding:"20px 16px",paddingBottom:"max(20px,env(safe-area-inset-bottom))",maxHeight:"70dvh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+        <div style={{fontWeight:700,fontSize:18,color:"#fff",marginBottom:16,textAlign:"center"}}>Personnaliser la playlist</div>
+
+        {/* Preview */}
+        <div style={{display:"flex",justifyContent:"center",marginBottom:20}}>
+          <PlaylistCover playlist={playlist} size={100}/>
+        </div>
+
+        {/* Tabs */}
+        <div style={{display:"flex",gap:8,marginBottom:16}}>
+          {[{id:"color",label:"🎨 Couleur"},
+            {id:"emoji",label:"😊 Emoji"},
+            {id:"photo",label:"📷 Photo"}
+          ].map(t=>(
+            <button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,background:tab===t.id?"#1DB954":"#181818",color:tab===t.id?"#000":"#fff",border:"none",borderRadius:20,padding:"8px 4px",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Color picker */}
+        {tab==="color"&&(
+          <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:8}}>
+            {COLORS.map(color=>(
+              <div key={color} onClick={()=>onUpdate({coverColor:color,coverImage:null})}
+                style={{height:44,borderRadius:8,background:color,cursor:"pointer",border:playlist.coverColor===color?"3px solid #fff":"3px solid transparent",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                {playlist.coverColor===color&&<span style={{color:"#fff",fontSize:18}}>✓</span>}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Emoji picker */}
+        {tab==="emoji"&&(
+          <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:8}}>
+            {EMOJIS.map(emoji=>(
+              <div key={emoji} onClick={()=>onUpdate({coverEmoji:emoji})}
+                style={{height:54,borderRadius:8,background:"#181818",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontSize:28,border:playlist.coverEmoji===emoji?"2px solid #1DB954":"2px solid transparent"}}>
+                {emoji}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Photo picker */}
+        {tab==="photo"&&(
+          <div>
+            <label style={{display:"block",background:"#1DB954",color:"#000",borderRadius:24,padding:"13px 20px",fontSize:15,fontWeight:700,cursor:"pointer",textAlign:"center",marginBottom:12}}>
+              📷 Choisir depuis la galerie
+              <input type="file" accept="image/*" style={{display:"none"}} onChange={e=>{
+                const file = e.target.files&&e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = ev => {
+                  onUpdate({coverImage: ev.target.result});
+                };
+                reader.readAsDataURL(file);
+                e.target.value="";
+              }}/>
+            </label>
+            {playlist.coverImage&&(
+              <button onClick={()=>onUpdate({coverImage:null})} style={{display:"block",width:"100%",background:"#E91429",color:"#fff",borderRadius:24,padding:"12px",fontSize:14,fontWeight:700,cursor:"pointer",border:"none",fontFamily:"inherit"}}>
+                🗑 Supprimer la photo
+              </button>
+            )}
+          </div>
+        )}
+
+        <button onClick={onClose} style={{display:"block",width:"100%",background:"#181818",color:"#fff",borderRadius:24,padding:"12px",fontSize:15,fontWeight:600,cursor:"pointer",border:"none",fontFamily:"inherit",marginTop:16}}>
+          Fermer
+        </button>
+      </div>
     </div>
   );
 }
