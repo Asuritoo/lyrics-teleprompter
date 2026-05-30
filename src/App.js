@@ -437,8 +437,33 @@ export default function App() {
     setSongs(s=>[...s,...newSongs]);
     setPlaylists(p=>[...p,newPlaylist]);
     setImportProgress({done:tracks.length,total:tracks.length,active:false});
-    alert("Import terminé ! "+newSongs.length+" chansons dans "+playlistName);
     setTab("library"); setView("lib");
+
+    // Phase 2 — fetch YouTube in background, song by song
+    const songsToEnrich = [...newSongs];
+    let ytDone = 0;
+    setImportProgress({done:0, total:songsToEnrich.length, active:true, phase:"youtube"});
+
+    for (let i = 0; i < songsToEnrich.length; i++) {
+      const song = songsToEnrich[i];
+      try {
+        const r = await fetch(BACKEND + "/search?title=" + encodeURIComponent(song.title) + "&artist=" + encodeURIComponent(song.artist||""));
+        if (r.ok) {
+          const data = await r.json();
+          if (data.videoId) {
+            setSongs(s => s.map(x => x.id === song.id
+              ? {...x, videoId:data.videoId, videoTitle:data.videoTitle, thumbnail:data.thumbnail}
+              : x
+            ));
+          }
+        }
+      } catch {}
+      ytDone++;
+      setImportProgress({done:ytDone, total:songsToEnrich.length, active:true, phase:"youtube"});
+      // Small delay to avoid hammering the API
+      await new Promise(res => setTimeout(res, 150));
+    }
+    setImportProgress({done:0, total:0, active:false, phase:null});
   }
 
   const allFiltered = songs.filter(s =>
@@ -690,6 +715,18 @@ export default function App() {
   // ── LIBRARY ──
   const libraryContent = (
     <div style={S.scrollBody} key="library">
+      {importProgress.active && importProgress.phase==="youtube" && (
+        <div style={{background:"#282828",borderRadius:8,padding:"10px 14px",marginBottom:12,display:"flex",alignItems:"center",gap:10}}>
+          <div style={{width:8,height:8,borderRadius:4,background:"#1DB954",animation:"pulse 1s infinite",flexShrink:0}}/>
+          <div style={{flex:1}}>
+            <div style={{color:"#fff",fontSize:13,fontWeight:600}}>Chargement des vidéos YouTube</div>
+            <div style={{height:3,background:"#181818",borderRadius:3,marginTop:6,overflow:"hidden"}}>
+              <div style={{height:"100%",width:`${importProgress.total>0?Math.round(importProgress.done/importProgress.total*100):0}%`,background:"#1DB954",borderRadius:3,transition:"width .3s ease"}}/>
+            </div>
+          </div>
+          <div style={{color:"#727272",fontSize:12}}>{importProgress.done}/{importProgress.total}</div>
+        </div>
+      )}
       {/* Playlists */}
       <div style={{display:"flex",gap:8,marginBottom:16,overflowX:"auto",paddingBottom:4}}>
         {["Tout","Playlists"].map(f=>(
@@ -730,7 +767,11 @@ export default function App() {
       </div>
       {importProgress.active&&(
         <div style={{...S.searchCard,marginTop:16}}>
-          <div style={{color:"#fff",fontSize:14,marginBottom:10}}>Import en cours... {importProgress.done}/{importProgress.total}</div>
+          <div style={{color:"#fff",fontSize:14,marginBottom:10}}>
+            {importProgress.phase==="youtube"
+              ? "🎬 Vidéos YouTube... " + importProgress.done + "/" + importProgress.total
+              : "🎵 Paroles... " + importProgress.done + "/" + importProgress.total}
+          </div>
           <div style={{height:4,background:"#282828",borderRadius:4,overflow:"hidden"}}>
             <div style={{height:"100%",width:`${importProgress.total>0?Math.round(importProgress.done/importProgress.total*100):0}%`,background:"#1DB954",borderRadius:4,transition:"width .3s ease"}}/>
           </div>
