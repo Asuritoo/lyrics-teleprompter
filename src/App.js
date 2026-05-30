@@ -1010,13 +1010,10 @@ export default function App() {
           </div>
           <div style={{display:"flex",gap:4,flexShrink:0}} onClick={e=>e.stopPropagation()}>
             <Btn onClick={e=>{e.stopPropagation();seek(-10);}} style={{background:"transparent",color:"#fff",fontSize:20,padding:"8px 6px"}}>⏮</Btn>
-            <Btn onClick={e=>{e.stopPropagation();togglePlay();}} style={{background:"transparent",color:"#fff",fontSize:24,padding:"8px 6px"}}>
-              {playing?"⏸":"▶"}
-            </Btn>
+            <Btn onClick={e=>{e.stopPropagation();togglePlay();}} style={{background:"transparent",color:"#fff",fontSize:24,padding:"8px 6px"}}>{playing?"⏸":"▶"}</Btn>
             <Btn onClick={e=>{e.stopPropagation();fullStop();}} style={{background:"transparent",color:"#535353",fontSize:18,padding:"8px 6px"}}>✕</Btn>
           </div>
         </div>
-      </div>
       )}
 
       {/* Bottom nav */}
