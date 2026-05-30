@@ -808,30 +808,36 @@ export default function App() {
             <div style={{fontSize:16,color:"#fff",marginBottom:8}}>Bienvenue dans Lyrics</div>
             <div style={{fontSize:14}}>Importe tes playlists Spotify ou ajoute une chanson</div>
           </div>
-        ) : <>
-        <div style={S.sectionTitle}>Accès rapide</div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:24}}>
-          {songs.slice(0,8).map(song=>(
-            <Btn key={song.id} onClick={()=>startSing(song)} style={S.quickCard}>
-              {song.thumbnail?<img src={song.thumbnail} alt="" style={{width:48,height:48,objectFit:"cover",borderRadius:4,flexShrink:0}}/>
-                :<div style={{width:48,height:48,background:"#282828",borderRadius:4,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>🎵</div>}
-              <span style={{fontSize:13,fontWeight:700,color:"#fff",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{song.title}</span>
-            </Btn>
-          ))}
-        </div>
-        {playlists.length>0&&<>
-          <div style={S.sectionTitle}>Mes playlists</div>
-          {playlists.slice(0,4).map(pl=>(
-            <Btn key={pl.id} onClick={()=>{setActivePlaylist(pl);setView("playlist_detail");}} style={S.playlistRow}>
-              <PlaylistCover playlist={pl} size={56}/>
-              <div style={{flex:1,minWidth:0}}>
-                <div style={{color:"#fff",fontWeight:700,fontSize:15}}>{pl.name}</div>
-                <div style={{color:"#727272",fontSize:13}}>{pl.fromSpotify?"Playlist • Spotify":"Playlist"} • {pl.songIds.length} titres</div>
-              </div>
-            </Btn>
-          ))}
-        </>}
-        </>}
+        ) : (
+          <>
+            <div style={S.sectionTitle}>Accès rapide</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:24}}>
+              {songs.slice(0,8).map(song=>(
+                <Btn key={song.id} onClick={()=>startSing(song)} style={S.quickCard}>
+                  {song.thumbnail
+                    ? <img src={song.thumbnail} alt="" style={{width:48,height:48,objectFit:"cover",borderRadius:4,flexShrink:0}}/>
+                    : <div style={{width:48,height:48,background:"#282828",borderRadius:4,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>🎵</div>
+                  }
+                  <span style={{fontSize:13,fontWeight:700,color:"#fff",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{song.title}</span>
+                </Btn>
+              ))}
+            </div>
+            {playlists.length > 0 && (
+              <>
+                <div style={S.sectionTitle}>Mes playlists</div>
+                {playlists.slice(0,4).map(pl=>(
+                  <Btn key={pl.id} onClick={()=>{setActivePlaylist(pl);setView("playlist_detail");}} style={S.playlistRow}>
+                    <PlaylistCover playlist={pl} size={56}/>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{color:"#fff",fontWeight:700,fontSize:15}}>{pl.name}</div>
+                      <div style={{color:"#727272",fontSize:13}}>{pl.fromSpotify?"Playlist • Spotify":"Playlist"} • {pl.songIds.length} titres</div>
+                    </div>
+                  </Btn>
+                ))}
+              </>
+            )}
+          </>
+        )}
       </div>
       <div style={{height:100}}/>
     </div>
