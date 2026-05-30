@@ -631,8 +631,15 @@ export default function App() {
 
   // ── HOME ──
   const homeContent = (
-    <div style={S.scrollBody}>
+    <div style={S.scrollBody} key="home">
       <div style={{paddingTop:8}}>
+        {songs.length === 0 ? (
+          <div style={{textAlign:"center",padding:"60px 20px",color:"#535353"}}>
+            <div style={{fontSize:40,marginBottom:12}}>🎵</div>
+            <div style={{fontSize:16,color:"#fff",marginBottom:8}}>Bienvenue dans Lyrics</div>
+            <div style={{fontSize:14}}>Importe tes playlists Spotify ou ajoute une chanson</div>
+          </div>
+        ) : <>
         <div style={S.sectionTitle}>Accès rapide</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:24}}>
           {songs.slice(0,8).map(song=>(
@@ -655,6 +662,7 @@ export default function App() {
             </Btn>
           ))}
         </>}
+        </>}
       </div>
       <div style={{height:100}}/>
     </div>
@@ -662,7 +670,7 @@ export default function App() {
 
   // ── SEARCH ──
   const searchContent = (
-    <div style={S.scrollBody}>
+    <div style={S.scrollBody} key="search">
       <div style={{...S.searchWrap,margin:"0 0 16px"}}>
         <span style={{color:"#727272",fontSize:16,marginRight:8}}>🔍</span>
         <input value={globalSearch} onChange={e=>setGlobalSearch(e.target.value)} placeholder="Artistes, chansons..." style={S.searchInput} autoFocus/>
@@ -681,7 +689,7 @@ export default function App() {
 
   // ── LIBRARY ──
   const libraryContent = (
-    <div style={S.scrollBody}>
+    <div style={S.scrollBody} key="library">
       {/* Playlists */}
       <div style={{display:"flex",gap:8,marginBottom:16,overflowX:"auto",paddingBottom:4}}>
         {["Tout","Playlists"].map(f=>(
@@ -707,7 +715,7 @@ export default function App() {
 
   // ── IMPORT ──
   const importContent = (
-    <div style={S.scrollBody}>
+    <div style={S.scrollBody} key="import">
       <div style={S.searchCard}>
         <div style={S.cardLabel}>📁 IMPORTER DEPUIS SPOTIFY</div>
         <div style={{color:"#b3b3b3",fontSize:13,lineHeight:1.7,marginBottom:16}}>
