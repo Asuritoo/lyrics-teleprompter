@@ -466,6 +466,31 @@ export default function App() {
     setImportProgress({done:0, total:0, active:false, phase:null});
   }
 
+  // Enrich all songs without YouTube video
+  async function enrichLibrary() {
+    const toEnrich = songs.filter(s => !s.videoId);
+    if (toEnrich.length === 0) { alert("Toutes les chansons ont déjà une vidéo !"); return; }
+    setImportProgress({done:0, total:toEnrich.length, active:true, phase:"youtube"});
+    for (let i = 0; i < toEnrich.length; i++) {
+      const song = toEnrich[i];
+      try {
+        const r = await fetch(BACKEND+"/search?title="+encodeURIComponent(song.title)+"&artist="+encodeURIComponent(song.artist||""));
+        if (r.ok) {
+          const data = await r.json();
+          if (data.videoId) {
+            setSongs(s => s.map(x => x.id===song.id
+              ? {...x, videoId:data.videoId, videoTitle:data.videoTitle, thumbnail:data.thumbnail}
+              : x
+            ));
+          }
+        }
+      } catch {}
+      setImportProgress({done:i+1, total:toEnrich.length, active:true, phase:"youtube"});
+      await new Promise(res => setTimeout(res, 150));
+    }
+    setImportProgress({done:0, total:0, active:false, phase:null});
+  }
+
   const allFiltered = songs.filter(s =>
     s.title.toLowerCase().includes(globalSearch.toLowerCase()) ||
     (s.artist||"").toLowerCase().includes(globalSearch.toLowerCase())
@@ -781,6 +806,19 @@ export default function App() {
         <div style={S.cardLabel}>➕ NOUVELLE CHANSON MANUELLE</div>
         <Btn onClick={()=>openEdit()} style={{...S.greenBtn,width:"100%"}}>Ajouter une chanson</Btn>
       </div>
+      {/* Enrich existing library */}
+      {songs.filter(s=>!s.videoId).length > 0 && !importProgress.active && (
+        <div style={{...S.searchCard,marginTop:16}}>
+          <div style={S.cardLabel}>🎬 ENRICHIR LA BIBLIOTHÈQUE</div>
+          <div style={{color:"#b3b3b3",fontSize:13,marginBottom:12}}>
+            {songs.filter(s=>!s.videoId).length} chansons sans vidéo YouTube
+          </div>
+          <Btn onClick={enrichLibrary} style={{...S.greenBtn,width:"100%"}}>
+            🎬 Charger les vidéos YouTube
+          </Btn>
+        </div>
+      )}
+
       <div style={{...S.searchCard,marginTop:16}}>
         <div style={S.cardLabel}>📋 CRÉER UNE PLAYLIST</div>
         <input value={newPlaylistName} onChange={e=>setNewPlaylistName(e.target.value)} placeholder="Nom de la playlist" style={{...S.spotInput,marginBottom:10}}/>
