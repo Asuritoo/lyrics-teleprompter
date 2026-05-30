@@ -327,6 +327,37 @@ export default function App() {
     }
   }
 
+  async function searchVideo() {
+    if (!active) return;
+    setVideoSearching(true);
+    setVideoSearchResults([]);
+    try {
+      const q = videoSearchQuery.trim() || (active.title + " " + (active.artist||""));
+      const r = await fetch(BACKEND+"/search-video?title="+encodeURIComponent(active.title)+"&artist="+encodeURIComponent(active.artist||"")+"&query="+encodeURIComponent(q));
+      if (r.ok) {
+        const data = await r.json();
+        setVideoSearchResults(data.results || []);
+      }
+    } catch {}
+    setVideoSearching(false);
+  }
+
+  function applyVideo(video) {
+    vibrate(10);
+    const updated = {...active, videoId:video.videoId, videoTitle:video.videoTitle, thumbnail:video.thumbnail};
+    setActive(updated);
+    setSongs(s => s.map(x => x.id===active.id ? {...x,...updated} : x));
+    setShowVideoSearch(false);
+    setVideoSearchResults([]);
+    setVideoSearchQuery("");
+    // Restart YT player with new video
+    try { ytPlayerRef.current?.destroy?.(); } catch {}
+    ytPlayerRef.current = null;
+    usingYT.current = false;
+    setYtReady(false);
+    setPlaying(false);
+  }
+
   function toggleMute() {
     vibrate(8);
     try {
@@ -598,7 +629,44 @@ export default function App() {
             <div style={{height:120}}/>
           </div>
         </div>
-      </div>
+      {/* Video search modal */}
+      {showVideoSearch && (
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.92)",zIndex:100,display:"flex",flexDirection:"column",paddingTop:"max(16px,env(safe-area-inset-top))"}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,padding:"0 12px 12px",borderBottom:"1px solid #282828"}}>
+            <Btn onClick={()=>{setShowVideoSearch(false);setVideoSearchResults([]);}} style={{background:"transparent",color:"#aaa",fontSize:18,padding:"8px 4px"}}>✕</Btn>
+            <input
+              value={videoSearchQuery}
+              onChange={e=>setVideoSearchQuery(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&searchVideo()}
+              placeholder="Chercher une vidéo YouTube..."
+              style={{flex:1,background:"#282828",borderRadius:8,padding:"10px 12px",color:"#fff",fontSize:14,fontFamily:"inherit",border:"none",outline:"none"}}
+              autoFocus
+            />
+            <Btn onClick={searchVideo} style={{background:"#1DB954",color:"#000",borderRadius:8,padding:"10px 14px",fontSize:14,fontWeight:700}}>
+              {videoSearching?"...":"🔍"}
+            </Btn>
+          </div>
+          <div style={{flex:1,overflowY:"auto",padding:"12px"}}>
+            {videoSearching && <div style={{textAlign:"center",color:"#535353",padding:40}}>Recherche...</div>}
+            {!videoSearching && videoSearchResults.length===0 && (
+              <div style={{textAlign:"center",color:"#535353",padding:40,fontSize:14}}>
+                Cherche une vidéo pour synchroniser avec les paroles
+              </div>
+            )}
+            {videoSearchResults.map(video=>(
+              <Btn key={video.videoId} onClick={()=>applyVideo(video)} style={{display:"flex",alignItems:"center",gap:10,width:"100%",background:"#181818",borderRadius:8,padding:"10px",marginBottom:8,textAlign:"left"}}>
+                <img src={video.thumbnail} alt="" style={{width:80,height:45,objectFit:"cover",borderRadius:4,flexShrink:0}}/>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{color:"#fff",fontSize:13,fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{video.videoTitle}</div>
+                  <div style={{color:"#727272",fontSize:11,marginTop:2}}>{video.channel}</div>
+                </div>
+                <span style={{color:"#1DB954",fontSize:18,flexShrink:0}}>▶</span>
+              </Btn>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
     );
   }
 
