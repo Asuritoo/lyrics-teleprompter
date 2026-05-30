@@ -416,7 +416,7 @@ export default function App() {
     const playlistId = Date.now().toString();
     const newPlaylist = {id:playlistId,name:playlistName,songIds:[],createdAt:Date.now(),fromSpotify:true};
     const newSongs = [];
-    const BATCH=10;
+    const BATCH=20;
     for (let b=0;b<tracks.length;b+=BATCH) {
       const batch=tracks.slice(b,b+BATCH);
       const results = await Promise.all(batch.map(async(track,j)=>{
