@@ -209,7 +209,7 @@ export default function App() {
 
   // Sync loop
   useEffect(() => {
-    if (view !== "sing" || !playing) {
+    if ((view !== "sing" && !miniPlayer) || !playing) {
       cancelAnimationFrame(syncRafRef.current); cancelAnimationFrame(rafRef.current);
       if (!playing) baseElapsed.current = elapsedRef.current;
       return;
@@ -283,11 +283,20 @@ export default function App() {
   }
 
   function stopSing() {
+    // Don't destroy player — keep it alive for mini player
+    cancelAnimationFrame(rafRef.current); cancelAnimationFrame(syncRafRef.current);
+    setLocked(false);
+    setMiniPlayer(true);
+    setView("lib");
+  }
+
+  function fullStop() {
     try { ytPlayerRef.current?.stopVideo?.(); ytPlayerRef.current?.destroy?.(); } catch {}
     ytPlayerRef.current = null; usingYT.current = false;
     cancelAnimationFrame(rafRef.current); cancelAnimationFrame(syncRafRef.current);
     setPlaying(false); setActive(null); setElapsed(0); elapsedRef.current=0; baseElapsed.current=0;
     setYtReady(false); setActiveIdx(-1); setLocked(false); setMuted(false);
+    setMiniPlayer(false);
     setView("lib");
   }
 
@@ -544,7 +553,7 @@ export default function App() {
     const fontSize = active.fontSize ?? 24;
     const hasYT = !!active.videoId;
     return (
-      <div style={S.singWrap}>
+      <div style={{...S.singWrap,animation:"slideUp 0.3s ease"}}>
         <style>{CSS}</style>
         {/* Bar */}
         <div style={S.singBar}>
@@ -576,6 +585,12 @@ export default function App() {
             <div id="yt-player" style={{width:"100%",height:"100%"}}/>
           </div>
         )}
+        {/* Hidden YT player for mini player mode */}
+        {!hasYT && miniPlayer && active?.videoId && (
+          <div style={{position:"absolute",width:1,height:1,overflow:"hidden",opacity:0,pointerEvents:"none"}}>
+            <div id="yt-player"/>
+          </div>
+        )}
         {/* Timer */}
         <div style={S.timerRow}>
           <span style={{fontFamily:"monospace",fontSize:12,color:"#535353"}}>{fmt(elapsed)}</span>
@@ -603,7 +618,7 @@ export default function App() {
                       textAlign:"center",maxWidth:580,margin:"0 auto",padding:"4px 8px",
                       fontSize:isCurrent?fontSize:isNext?Math.round(fontSize*.85):Math.round(fontSize*.65),
                       fontWeight:isCurrent?700:isNext?500:400,
-                      color:isCurrent?"#fff":isPast?"#282828":isNext?"#727272":"#535353",
+                      color:isCurrent?"#fff":isPast?"#282828":isNext?"#727272":"#535353",transition:"font-size .25s cubic-bezier(.4,0,.2,1),color .3s ease",
                       transition:"font-size .2s ease,color .2s ease",
                       lineHeight:1.5,letterSpacing:isCurrent?"0.01em":"normal",cursor:"pointer",
                       fontFamily:"'Circular Std','Helvetica Neue',sans-serif",
@@ -755,7 +770,7 @@ export default function App() {
 
   // ── HOME ──
   const homeContent = (
-    <div style={S.scrollBody} key="home">
+    <div style={{...S.scrollBody,animation:"slideIn 0.22s ease"}} key="home">
       <div style={{paddingTop:8}}>
         {songs.length === 0 ? (
           <div style={{textAlign:"center",padding:"60px 20px",color:"#535353"}}>
@@ -794,7 +809,7 @@ export default function App() {
 
   // ── SEARCH ──
   const searchContent = (
-    <div style={S.scrollBody} key="search">
+    <div style={{...S.scrollBody,animation:"fadeIn 0.18s ease"}} key="search">
       <div style={{...S.searchWrap,margin:"0 0 16px"}}>
         <span style={{color:"#727272",fontSize:16,marginRight:8}}>🔍</span>
         <input value={globalSearch} onChange={e=>setGlobalSearch(e.target.value)} placeholder="Artistes, chansons..." style={S.searchInput} autoFocus/>
@@ -813,7 +828,7 @@ export default function App() {
 
   // ── LIBRARY ──
   const libraryContent = (
-    <div style={S.scrollBody} key="library">
+    <div style={{...S.scrollBody,animation:"slideIn 0.22s ease"}} key="library">
       {importProgress.active && importProgress.phase==="youtube" && (
         <div style={{background:"#282828",borderRadius:8,padding:"10px 14px",marginBottom:12,display:"flex",alignItems:"center",gap:10}}>
           <div style={{width:8,height:8,borderRadius:4,background:"#1DB954",animation:"pulse 1s infinite",flexShrink:0}}/>
@@ -851,7 +866,7 @@ export default function App() {
 
   // ── IMPORT ──
   const importContent = (
-    <div style={S.scrollBody} key="import">
+    <div style={{...S.scrollBody,animation:"slideIn 0.22s ease"}} key="import">
       <div style={S.searchCard}>
         <div style={S.cardLabel}>📁 IMPORTER DEPUIS SPOTIFY</div>
         <div style={{color:"#b3b3b3",fontSize:13,lineHeight:1.7,marginBottom:16}}>
@@ -923,6 +938,49 @@ export default function App() {
 
       {/* Content */}
       {tabContent}
+
+      {/* Mini player */}
+      {miniPlayer && active && (
+        <div style={{
+          background:"#181818",
+          borderTop:"1px solid #282828",
+          padding:"8px 12px",
+          display:"flex",
+          alignItems:"center",
+          gap:10,
+          flexShrink:0,
+          animation:"miniIn 0.3s ease",
+          cursor:"pointer",
+        }} onClick={()=>setView("sing")}>
+          {active.thumbnail
+            ?<img src={active.thumbnail} alt="" style={{width:44,height:44,objectFit:"cover",borderRadius:4,flexShrink:0}}/>
+            :<div style={{width:44,height:44,background:"#282828",borderRadius:4,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>🎵</div>
+          }
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{color:"#fff",fontSize:14,fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{active.title}</div>
+            <div style={{color:"#727272",fontSize:12,marginTop:1}}>{active.artist||""}</div>
+            {/* Progress bar */}
+            <div style={{height:2,background:"#282828",borderRadius:2,marginTop:6,overflow:"hidden"}}>
+              <div style={{
+                height:"100%",
+                width: active.syncedLines && active.syncedLines.length > 0
+                  ? `${Math.min(100,(elapsed/(active.syncedLines[active.syncedLines.length-1].time||1))*100)}%`
+                  : "0%",
+                background:"#1DB954",
+                borderRadius:2,
+                transition:"width .5s linear",
+              }}/>
+            </div>
+          </div>
+          <div style={{display:"flex",gap:4,flexShrink:0}} onClick={e=>e.stopPropagation()}>
+            <Btn onClick={e=>{e.stopPropagation();seek(-10);}} style={{background:"transparent",color:"#fff",fontSize:20,padding:"8px 6px"}}>⏮</Btn>
+            <Btn onClick={e=>{e.stopPropagation();togglePlay();}} style={{background:"transparent",color:"#fff",fontSize:24,padding:"8px 6px"}}>
+              {playing?"⏸":"▶"}
+            </Btn>
+            <Btn onClick={e=>{e.stopPropagation();fullStop();}} style={{background:"transparent",color:"#535353",fontSize:18,padding:"8px 6px"}}>✕</Btn>
+          </div>
+        </div>
+      )}
 
       {/* Bottom nav */}
       <div style={S.bottomNav}>
@@ -1157,7 +1215,13 @@ const CSS = `
   input:focus, textarea:focus { border: none !important; outline: none !important; }
   input::placeholder, textarea::placeholder { color: ${SP.gray3}; }
   @keyframes pulse { 0%,100%{opacity:.2} 50%{opacity:.8} }
+  @keyframes slideUp { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
+  @keyframes slideIn { from{opacity:0;transform:translateX(30px)} to{opacity:1;transform:none} }
+  @keyframes fadeIn { from{opacity:0} to{opacity:1} }
+  @keyframes miniIn { from{opacity:0;transform:translateY(80px)} to{opacity:1;transform:translateY(0)} }
   ::-webkit-scrollbar { display: none; }
+  .page-enter { animation: slideIn 0.25s ease; }
+  .fade-enter { animation: fadeIn 0.2s ease; }
 `;
 
 const S = {
