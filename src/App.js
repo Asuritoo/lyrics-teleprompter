@@ -834,6 +834,8 @@ function PlaylistCover({ playlist, size=56, onClick }) {
     background: playlist.coverColor || "#282828",
     fontSize: size * 0.4,
     position: "relative",
+    minWidth: size, minHeight: size,
+    maxWidth: size, maxHeight: size,
   };
   if (playlist.coverImage) {
     return <div style={style} onClick={onClick}>
@@ -943,7 +945,7 @@ function TrackRow({ song, onPlay, onEdit, onAdd, onRemove, onDelete }) {
 
   return (
     <div style={{position:"relative",marginBottom:2,overflow:"hidden"}}>
-      <div style={{position:"absolute",right:0,top:0,bottom:0,background:onRemove?"#e91429":"#e91429",display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:20,minWidth:72,borderRadius:4}}>
+      <div style={{position:"absolute",right:0,top:0,bottom:0,background:"#e91429",display:"flex",alignItems:"center",justifyContent:"flex-end",paddingRight:20,minWidth:72,borderRadius:4,zIndex:0,overflow:"hidden"}}>
         <Btn onClick={onRemove||onDelete} style={{background:"transparent",color:"#fff",fontSize:20,padding:"8px"}}>🗑</Btn>
       </div>
       <div style={{...S.trackRow,transform:`translateX(${dx}px)`,transition:(dx===0||dx===-72)?"transform .2s ease":"none"}}
@@ -998,9 +1000,9 @@ const CSS = `
 `;
 
 const S = {
-  page:       { height:"100dvh", background:SP.bg, color:SP.white, fontFamily:"'Circular Std','Helvetica Neue',Helvetica,Arial,sans-serif", display:"flex", flexDirection:"column", overflow:"hidden" },
+  page:       { height:"100dvh", background:SP.bg, color:SP.white, fontFamily:"'Circular Std','Helvetica Neue',Helvetica,Arial,sans-serif", display:"flex", flexDirection:"column", overflow:"hidden", position:"relative" },
   header:     { display:"flex", alignItems:"center", justifyContent:"space-between", padding:"0 16px 12px", paddingTop:"max(16px,env(safe-area-inset-top))", flexShrink:0 },
-  subHeader:  { display:"flex", alignItems:"center", gap:12, padding:"0 16px 14px", paddingTop:"max(16px,env(safe-area-inset-top))", flexShrink:0 },
+  subHeader:  { display:"flex", alignItems:"center", gap:12, padding:"0 16px 14px", paddingTop:"max(16px,env(safe-area-inset-top))", flexShrink:0, overflow:"hidden", zIndex:10, background:"#121212" },
   backBtn:    { background:"transparent", color:SP.white, fontSize:22, padding:"8px 0" },
   subTitle:   { fontSize:18, fontWeight:700, color:SP.white },
   scrollBody: { flex:1, overflowY:"auto", padding:"0 16px", WebkitOverflowScrolling:"touch" },
